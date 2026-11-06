@@ -1,0 +1,73 @@
+# Cấu hình AI Web Agency
+agency_name: "HD Agency"
+agency_tagline: "Ao làng Elio"     # dòng nhỏ dưới tên agency
+owner_name: "Sếp"                 # cách các agent xưng hô với chủ agency trong hội thoại
+owner_display: "HD. Elio"         # tên chủ agency hiện ở góc phải trên cùng
+
+# Model mặc định cho mọi agent (đổi theo từng vai trò ở mục roles bên dưới)
+default_model: claude-opus-5-5
+default_effort: medium        # low | medium | high | xhigh | max
+max_tokens: 32000             # giới hạn output mỗi lượt gọi model
+use_fallbacks: true           # tự chuyển model khi bị từ chối (server-side fallback)
+
+limits:
+  qa_rounds: 3                # số vòng Dev ⇄ QA tối đa cho mỗi task
+  review_rounds: 2            # số vòng Kiểm duyệt trả về sửa tối đa
+  max_tool_iterations: 40     # số lượt gọi tool tối đa của một agent cho một việc
+  token_budget: 4000000       # tổng token (in + out) tối đa cho một lần chạy project
+
+# Bảng giá $/1M token để ước tính chi phí
+pricing:
+  claude-opus-5-5:   {input: 4.0, output: 20.0}
+  claude-sonnet-5-5: {input: 2.0, output: 10.0}
+  claude-haiku-5-5:  {input: 0.1, output: 0.5}
+
+# Công cụ chạy lệnh trong workspace (dùng PHP/Composer của Laragon)
+php_bin: "C:/laragon/bin/php/php-8.5.12-Win32-vs17-x64/php.exe"
+composer_phar: "C:/laragon/bin/composer/composer.phar"
+npm_bin: "npm"
+command_timeout: 240          # giây
+preview_port_start: 8100
+
+# Nhân sự: mỗi vai trò có tên hiển thị, phòng ban, màu, model và effort riêng
+roles:
+  pm:
+    name: "Elio"
+    title: "Trưởng dự án"
+    department: "Điều hành"
+    color: "#f59e0b"
+    effort: high
+  designer:
+    name: "Hung"
+    title: "UI/UX Designer"
+    department: "UI/UX"
+    color: "#a855f7"
+    model: claude-sonnet-5-5   # tiết kiệm chi phí
+    effort: medium
+  frontend:
+    name: "Duong"
+    title: "Frontend Dev"
+    department: "Dev"
+    color: "#3b82f6"
+    model: claude-sonnet-5-5   # tiết kiệm chi phí
+    effort: high
+  backend:
+    name: "Nam"
+    title: "Backend Dev"
+    department: "Dev"
+    color: "#06b6d4"
+    model: claude-sonnet-5-5   # tiết kiệm chi phí
+    effort: high
+  qa:
+    name: "APhu"
+    title: "Tester (QA)"
+    department: "QA"
+    color: "#22c55e"
+    model: claude-sonnet-5-5   # tiết kiệm chi phí
+    effort: medium
+  reviewer:
+    name: "Bao"
+    title: "Kiểm duyệt viên"
+    department: "Kiểm duyệt"
+    color: "#ef4444"
+    effort: high

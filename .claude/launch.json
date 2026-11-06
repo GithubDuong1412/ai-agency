@@ -1,0 +1,17 @@
+{
+  "version": "0.0.1",
+  "configurations": [
+    {
+      "name": "agency",
+      "runtimeExecutable": "C:/laragon/www/ai-agency/.venv/Scripts/python.exe",
+      "runtimeArgs": ["-m", "uvicorn", "backend.main:app", "--host", "127.0.0.1", "--port", "8000"],
+      "port": 8000
+    },
+    {
+      "name": "agency-demo",
+      "runtimeExecutable": "C:/laragon/www/ai-agency/.venv/Scripts/python.exe",
+      "runtimeArgs": ["-c", "import os,uvicorn; os.environ['AGENCY_DEMO']='1'; uvicorn.run('backend.main:app', host='127.0.0.1', port=8001)"],
+      "port": 8001
+    }
+  ]
+}

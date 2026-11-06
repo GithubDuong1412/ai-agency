@@ -1,0 +1,104 @@
+@import "tailwindcss";
+
+@theme {
+  --font-sans: "Be Vietnam Pro", ui-sans-serif, system-ui, sans-serif;
+  --color-ink-950: #070c16;
+  --color-ink-900: #0b1220;
+  --color-ink-850: #0f1828;
+  --color-ink-800: #142033;
+  --color-ink-700: #1d2c44;
+  --color-ink-600: #2a3b57;
+  --color-floor: #3d7f77;
+  /* chữ phụ trên nền tối: đạt 4.5:1 kể cả trên ink-700 (slate-500 chỉ 3.4–3.9:1) */
+  --color-muted: #8696b0;
+  --color-floor-dark: #2e6660;
+}
+
+html, body, #root { height: 100%; }
+body {
+  margin: 0;
+  background: var(--color-ink-950);
+  color: #e6edf7;
+  font-family: var(--font-sans);
+  -webkit-font-smoothing: antialiased;
+}
+
+.panel { @apply rounded-2xl border border-white/5 bg-ink-900; }
+.label { @apply text-[10px] font-semibold uppercase tracking-[0.14em] text-slate-400; }
+.scroll-thin::-webkit-scrollbar { width: 6px; height: 6px; }
+.scroll-thin::-webkit-scrollbar-thumb { background: #2a3b57; border-radius: 6px; }
+
+@keyframes ticker { from { transform: translateX(0); } to { transform: translateX(-50%); } }
+.animate-ticker { animation: ticker 60s linear infinite; }
+@keyframes pop { from { opacity: 0; transform: translateY(4px) scale(.96); } to { opacity: 1; transform: none; } }
+.animate-pop { animation: pop .25s ease-out; }
+@keyframes bob { 0%,100% { transform: translateY(0); } 50% { transform: translateY(-3px); } }
+.animate-bob { animation: bob 1.4s ease-in-out infinite; }
+/* Nền vũ trụ cho sơ đồ 3D: không gian xanh thẫm, tinh vân teal/xanh dương/hồng nhạt, 3 lớp sao (nhỏ-vừa-to)
+   xếp ô kích thước lệch nhau để không thấy lặp, quầng sáng sau toà nhà để văn phòng như trạm nổi giữa vũ trụ. */
+.scene-bg {
+  overflow: hidden;
+  background:
+    /* quầng sáng sau toà nhà + bóng mềm dưới chân */
+    radial-gradient(ellipse 40% 28% at 46% 64%, rgba(1, 4, 10, .6), transparent 70%),
+    radial-gradient(ellipse 50% 42% at 46% 48%, rgba(94, 234, 212, .16), transparent 70%),
+    /* tinh vân */
+    radial-gradient(ellipse 45% 35% at 12% 18%, rgba(45, 212, 191, .28), transparent 70%),
+    radial-gradient(ellipse 40% 45% at 92% 30%, rgba(59, 130, 246, .30), transparent 70%),
+    radial-gradient(ellipse 35% 28% at 80% 92%, rgba(244, 114, 182, .18), transparent 70%),
+    radial-gradient(ellipse 30% 25% at 8% 85%, rgba(56, 189, 248, .18), transparent 70%),
+    radial-gradient(ellipse 60% 18% at 50% 8%, rgba(129, 140, 248, .12), transparent 70%),
+    /* sao to (có quầng) */
+    radial-gradient(circle at 63px 211px, #fff 1.4px, rgba(186, 230, 253, .35) 2.6px, transparent 4px) 0 0 / 433px 389px,
+    radial-gradient(circle at 301px 57px, #fff 1.2px, rgba(186, 230, 253, .3) 2.4px, transparent 3.6px) 0 0 / 433px 389px,
+    /* sao vừa */
+    radial-gradient(circle at 37px 81px, rgba(255, 255, 255, .9) 1px, transparent 1.6px) 0 0 / 263px 227px,
+    radial-gradient(circle at 181px 163px, rgba(226, 232, 240, .8) 1px, transparent 1.6px) 0 0 / 263px 227px,
+    radial-gradient(circle at 219px 29px, rgba(204, 251, 241, .8) 1px, transparent 1.6px) 0 0 / 263px 227px,
+    /* sao nhỏ, mờ */
+    radial-gradient(circle at 17px 23px, rgba(255, 255, 255, .55) .7px, transparent 1.2px) 0 0 / 97px 83px,
+    radial-gradient(circle at 71px 61px, rgba(203, 213, 225, .45) .7px, transparent 1.2px) 0 0 / 97px 83px,
+    radial-gradient(circle at 53px 11px, rgba(255, 255, 255, .5) .7px, transparent 1.1px) 0 0 / 131px 113px,
+    radial-gradient(circle at 101px 87px, rgba(255, 255, 255, .5) .7px, transparent 1.1px) 0 0 / 131px 113px,
+    radial-gradient(circle at 9px 52px, rgba(224, 242, 254, .55) .7px, transparent 1.1px) 0 0 / 73px 67px,
+    radial-gradient(circle at 44px 7px, rgba(255, 255, 255, .4) .6px, transparent 1px) 0 0 / 59px 71px,
+    radial-gradient(circle at 141px 97px, rgba(255, 255, 255, .85) 1px, transparent 1.6px) 0 0 / 191px 173px,
+    /* không gian sâu */
+    radial-gradient(ellipse 120% 90% at 50% 40%, #0d1630 0%, #070c1d 55%, #03060f 100%);
+}
+/* lớp sao lấp lánh nhẹ (dừng khi tắt chuyển động hoặc máy bật giảm chuyển động) */
+.scene-bg::before {
+  content: ""; position: absolute; inset: 0;
+  background:
+    radial-gradient(circle at 120px 40px, #fff 1.1px, transparent 2px) 0 0 / 347px 301px,
+    radial-gradient(circle at 260px 210px, #e0f2fe 1px, transparent 1.8px) 0 0 / 347px 301px,
+    radial-gradient(circle at 30px 160px, #ccfbf1 1px, transparent 1.8px) 0 0 / 347px 301px;
+  animation: twinkle 4.5s ease-in-out infinite alternate;
+}
+/* viền tối 4 góc để mắt tập trung vào toà nhà */
+.scene-bg::after {
+  content: ""; position: absolute; inset: 0;
+  background: radial-gradient(ellipse 85% 75% at 50% 50%, transparent 55%, rgba(2, 4, 10, .7) 100%);
+}
+@keyframes twinkle { from { opacity: .25; } to { opacity: 1; } }
+.scene-bg.still::before { animation: none; opacity: .7; }
+@media (prefers-reduced-motion: reduce) { .scene-bg::before { animation: none; opacity: .7; } }
+/* Nút "Dừng chuyển động" trên sơ đồ */
+.motion-off .animate-ticker { animation-play-state: paused; }
+.motion-off .animate-bob { animation: none; }
+
+.md h1 { @apply text-xl font-bold mt-2 mb-2; }
+.md h2 { @apply text-lg font-semibold mt-4 mb-2; }
+.md h3 { @apply font-semibold mt-3 mb-1; }
+.md p { @apply my-2 leading-relaxed; }
+.md ul { @apply list-disc pl-5 my-2; }
+.md ol { @apply list-decimal pl-5 my-2; }
+.md code { @apply rounded bg-ink-700 px-1 py-0.5 text-[0.85em]; }
+.md pre { @apply rounded-lg bg-ink-950 p-3 overflow-x-auto text-xs; }
+.md a { @apply text-teal-300 underline; }
+.md table { @apply my-2 text-sm; }
+.md th, .md td { @apply border border-white/10 px-2 py-1; }
+
+@media (prefers-reduced-motion: reduce) {
+  .animate-ticker, .animate-pop, .animate-bob { animation: none; }
+}

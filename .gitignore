@@ -1,0 +1,39 @@
+# ===== Bí mật / cấu hình cục bộ =====
+.env
+.env.*
+!.env.example
+*.pem
+*.key
+.claude/settings.local.json
+
+# ===== Python =====
+.venv/
+venv/
+__pycache__/
+*.py[cod]
+.pytest_cache/
+.coverage
+htmlcov/
+
+# ===== Dữ liệu runtime (DB, project sinh ra) =====
+data/
+*.db
+*.sqlite
+*.sqlite3
+workspaces/*
+!workspaces/.gitkeep
+
+# ===== Laravel skeleton (tải lại bằng composer, xem README) =====
+backend/templates/laravel-skeleton/
+
+# ===== Frontend =====
+node_modules/
+frontend/dist/
+
+# ===== Log / OS / IDE =====
+*.log
+.DS_Store
+Thumbs.db
+desktop.ini
+.idea/
+.vscode/
