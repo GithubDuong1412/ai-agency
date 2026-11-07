@@ -23,6 +23,8 @@ Cách làm việc:
 - Có thể dùng post_message để nhắn ngắn cho đồng đội (vd. dặn QA kiểm tra gì). Đừng nhắn quá nhiều.
 - Khi nhắc tới đồng đội trong tin nhắn, ghi chú bàn giao hay báo cáo, viết mã dạng {@designer}, {@qa}, {@pm}…
   (Sếp là {@owner}) thay vì tên riêng: giao diện tự hiển thị tên hiện tại của người đó.
+- Sếp có thể đính kèm ảnh (ảnh lỗi, mẫu tham khảo, logo): xem kỹ và làm theo. Ảnh mẫu là để lấy ý,
+  không sao chép thương hiệu hay nội dung của người khác.
 - Khi xong, gọi đúng một tool nộp kết quả (submit_*) được nêu trong nhiệm vụ. Không kết thúc mà không nộp.
 - Viết ngắn gọn, đi thẳng vào việc. Mọi chữ bạn viết ra (kể cả lời dẫn giữa các bước) đều hiện trong khung
   hội thoại cho Sếp đọc, nên:
@@ -35,6 +37,8 @@ Cách làm việc:
 # Dùng khi thư mục agents/ thiếu luật chung (_team/rules.md)
 FALLBACK_CONVENTIONS = """Sản phẩm là một ứng dụng Laravel 13 (PHP 8.5) nằm ở thư mục gốc workspace, dùng SQLite
 (database/database.sqlite đã có sẵn, .env đã cấu hình). Server xem trước do hệ thống tự chạy.
+database.sqlite chứa dữ liệu thật Sếp/khách đã nhập: không xoá (cấm migrate:fresh/refresh/reset/rollback, db:wipe);
+chỉ dùng `php artisan migrate --force`, seeder dùng updateOrCreate để chạy lại được.
 
 Quy ước kỹ thuật chung:
 - Giao diện dùng Blade + Tailwind CSS qua CDN: <script src="https://cdn.jsdelivr.net/npm/@tailwindcss/browser@4"></script>
@@ -89,7 +93,7 @@ Chỉ ghi file DESIGN.md (có thể cập nhật nếu đã có).""",
         "backend",
         """Bạn là Backend Dev Laravel. Bạn làm routes, controllers, models, migrations, seeders, validation, mail/log.
 - Viết code Laravel chuẩn, dùng Form Request hoặc $request->validate, Eloquent, đặt tên rõ ràng.
-- Sau khi tạo migration, chạy `php artisan migrate --force`. Có seeder thì chạy `php artisan db:seed --force`.
+- Sau khi tạo migration, chạy `php artisan migrate --force` (không bao giờ migrate:fresh). Có seeder thì chạy `php artisan db:seed --force`.
 - Viết feature test cho route/form và chạy `php artisan test` tới khi pass.
 - Nếu cần view tạm để route chạy, tạo view đơn giản dùng layout chung; Frontend sẽ hoàn thiện giao diện.""",
         tuple(READ_TOOLS + ["read_knowledge"] + WRITE_TOOLS + ["run_command", "post_message"]),

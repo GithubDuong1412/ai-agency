@@ -1,5 +1,6 @@
 import { fillNames } from '../names'
-import { GizmoHelper, GizmoViewport, Html, OrbitControls, QuadraticBezierLine } from '@react-three/drei'
+import { GizmoHelper, GizmoViewport, OrbitControls, QuadraticBezierLine } from '@react-three/drei'
+import { Html } from '../vendor/drei-html'  // Html của drei, vá lỗi gỡ nhãn khi rời sơ đồ 3D (React 19)
 import { Canvas, useFrame, useThree } from '@react-three/fiber'
 import { useEffect, useMemo, useRef, useState, type ComponentRef } from 'react'
 import * as THREE from 'three'

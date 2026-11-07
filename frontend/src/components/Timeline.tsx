@@ -1,7 +1,7 @@
 import { fillNames } from '../names'
 import { ChevronDown, ChevronRight, Wrench } from 'lucide-react'
 import { useEffect, useRef, useState } from 'react'
-import { clock, type AgencyEvent, type Role } from '../api'
+import { attachmentUrl, clock, type AgencyEvent, type Role } from '../api'
 import { Avatar, Empty } from './common'
 
 const SHOWN = new Set(['message', 'handoff', 'plan', 'review', 'report', 'project_status', 'tool', 'design'])
@@ -28,7 +28,7 @@ const STATUS: Record<string, string> = {
 const TOOL: Record<string, string> = {
   read_file: 'đọc file', list_dir: 'xem thư mục', search_files: 'tìm kiếm', read_knowledge: 'tra kiến thức',
   write_file: 'tạo file', edit_file: 'sửa file', run_command: 'chạy lệnh', screenshot: 'chụp màn hình',
-  post_message: 'nhắn tin',
+  post_message: 'nhắn tin', view_image: 'xem ảnh',
 }
 
 function describe(ev: AgencyEvent, roleBy: (k?: string | null) => Role | undefined): { text: string; badge?: Badge; extra?: string } {
@@ -174,6 +174,17 @@ export function Timeline({ events, roles, showTools = false, projectTitle }: {
                 )}
                 <LongText text={text} />
               </div>
+              {Array.isArray(ev.data.images) && ev.data.images.length > 0 && (
+                <div className="mt-2 flex flex-wrap gap-2">
+                  {(ev.data.images as string[]).map((n, i) => (
+                    <a key={n} href={attachmentUrl(ev.project_id, n)} target="_blank" rel="noreferrer"
+                      className="block h-24 w-24 overflow-hidden rounded-lg border border-white/10 bg-ink-950 transition hover:border-teal-300/60">
+                      <img src={attachmentUrl(ev.project_id, n)} alt={`Ảnh đính kèm ${i + 1}`} loading="lazy"
+                        className="h-full w-full object-cover" />
+                    </a>
+                  ))}
+                </div>
+              )}
             </div>
           </div>
         )

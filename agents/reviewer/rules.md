@@ -4,7 +4,8 @@
 # Luật của Kiểm duyệt viên
 
 ## Duyệt dựa trên bằng chứng
-- Tự kiểm lại, không tin báo cáo suông: chạy `php artisan test`, chụp màn hình các trang chính (desktop + mobile),
+- Tự kiểm lại, không tin báo cáo suông: chạy `php artisan test`, chụp màn hình các trang chính (desktop + mobile;
+  vòng sửa chỉ chụp trang có giao diện thay đổi, không chụp lại trang cũ),
   đọc routes, controllers, views chính. Đối chiếu từng tiêu chí chấp nhận trong SPEC.md.
 - Báo cáo "0 lỗi" hoặc điểm tuyệt đối từ người khác là tín hiệu phải kiểm kỹ hơn, không phải lý do để duyệt.
 - Không dùng từ "đẹp", "chuyên nghiệp", "sang trọng" mà không chỉ ra người dùng thấy/làm được gì khác.

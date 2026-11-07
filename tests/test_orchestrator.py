@@ -140,3 +140,37 @@ def test_missing_api_key_fails_cleanly(tmp_path, monkeypatch):
     _wait(agency, p["id"])
     proj = db.get_project(p["id"])
     assert proj["status"] == "failed" and "API_KEY" in proj["error"]
+
+
+def test_run_screenshots_only_current_round_latest_per_page(tmp_path):
+    from backend.orchestrator import run_screenshots
+    for name in ["1000_home_desktop.png", "2000_home_desktop.png", "3000_home_desktop.png",
+                 "2500_menu_mobile.png", "1500_admin_mobile.png", "x_notes.png"]:
+        (tmp_path / name).write_bytes(b"")
+    # vòng bắt đầu lúc 2000: bỏ ảnh vòng cũ, mỗi trang+khung giữ ảnh mới nhất
+    assert run_screenshots(tmp_path, 2000) == ["2500_menu_mobile.png", "3000_home_desktop.png"]
+    assert run_screenshots(tmp_path, 9000) == []
+
+
+def test_attached_images_reach_pm_and_designer(tmp_path):
+    seen = {}
+
+    class ImgAgent(FakeAgent):
+        def run(self, instruction, submit, images=None):
+            seen.setdefault(self.role, []).append((images, instruction))
+            return super().run(instruction, submit)
+
+    agency, db = make_agency(tmp_path)
+    state = {"qa": 1, "review": 1}
+    agency._agent_factory = lambda role, ctx, hooks: ImgAgent(role, ctx, hooks, state)
+    p = agency.start_project("Làm web theo mẫu", images=[(b"\x89PNG", "png")])
+    _wait(agency, p["id"])
+    pm_imgs = seen["pm"][0][0]
+    assert len(pm_imgs) == 1 and pm_imgs[0].read_bytes() == b"\x89PNG"
+    assert seen["designer"][0][0] == pm_imgs
+    # Dev/Kiểm duyệt không nhận ảnh trực tiếp, chỉ được báo đường dẫn để tự xem
+    images, instr = seen["backend"][0]
+    assert images is None and ".agency/attachments/" in instr
+    assert ".agency/attachments/" in seen["reviewer"][0][1]
+    cmd = [e for e in db.list_events(p["id"]) if e["type"] == "message" and e["data"].get("kind") == "command"]
+    assert cmd[0]["data"]["images"] == [pm_imgs[0].name]

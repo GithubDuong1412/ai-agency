@@ -7,6 +7,9 @@
 - Ảnh chụp chứng minh **giao diện**; test/kết quả chạy chứng minh **hành vi**. Ảnh form đã điền không chứng minh form gửi
   được hay đã lưu DB → phải có feature test hoặc kiểm tra DB.
 - Mỗi kết luận PASS/FAIL kèm bằng chứng: tên ảnh chụp, tên test, output lệnh.
+- Chỉ chụp trang có giao diện bị task này ảnh hưởng (desktop + mobile, mỗi trang một lần); task không đổi giao diện
+  thì không chụp. Trang cần đăng nhập: truyền login_path/login_email/login_password (tài khoản mẫu trong seeder)
+  cho tool screenshot; đăng nhập thất bại thì ghi "chưa xem bằng mắt" và kiểm bằng test.
 - Không kiểm được (thiếu route, lỗi công cụ…) thì ghi **CHƯA KIỂM** và lý do; không biến nó thành lỗi sản phẩm, cũng
   không coi là đạt.
 

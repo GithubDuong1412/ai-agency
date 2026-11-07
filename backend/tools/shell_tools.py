@@ -13,6 +13,8 @@ MAX_OUTPUT = 12_000
 # Lệnh artisan bị cấm (chạy code tuỳ ý hoặc chặn tiến trình)
 BLOCKED_ARTISAN = {"tinker", "serve", "down", "up", "queue:work", "queue:listen", "schedule:work",
                    "reverb:start", "octane:start", "pail", "env:decrypt", "env:encrypt"}
+# Lệnh xoá dữ liệu thật trong database/database.sqlite (lịch đặt, đơn hàng… do khách nhập khi xem trước)
+BLOCKED_DATA = {"migrate:fresh", "migrate:refresh", "migrate:reset", "migrate:rollback", "db:wipe"}
 ALLOWED_COMPOSER = {"install", "require", "remove", "dump-autoload", "update", "show", "validate"}
 ALLOWED_NPM = {"install", "ci", "run"}
 ALLOWED_NPM_SCRIPTS = {"build"}
@@ -52,6 +54,10 @@ class CommandRunner:
                 if len(args) < 2:
                     return [self.php_bin, "artisan", "list"]
                 sub = args[1].lower()
+                if sub in BLOCKED_DATA:
+                    raise SandboxError(f"Không được chạy 'php artisan {sub}': lệnh này xoá dữ liệu thật mà Sếp/khách đã nhập. "
+                                       "Dùng 'php artisan migrate --force' (chỉ thêm thay đổi mới) và seeder chạy lại được "
+                                       "(updateOrCreate/firstOrCreate). Cần dữ liệu sạch thì viết test (test dùng DB riêng trong bộ nhớ).")
                 if sub in BLOCKED_ARTISAN:
                     raise SandboxError(f"Không được chạy 'php artisan {sub}'. "
                                        "Server xem trước do hệ thống quản lý.")

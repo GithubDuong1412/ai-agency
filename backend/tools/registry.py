@@ -45,6 +45,15 @@ TOOL_SCHEMAS: dict[str, dict] = {
             "required": ["pattern"],
         },
     },
+    "view_image": {
+        "description": ("Xem một file ảnh trong workspace (PNG, JPEG, WebP, GIF; tối đa 5MB), vd. ảnh Sếp đính kèm "
+                        "ở .agency/attachments/ hoặc ảnh trong public/. Trả về chính ảnh để bạn nhìn."),
+        "input_schema": {
+            "type": "object",
+            "properties": {"path": {"type": "string", "description": "Đường dẫn tương đối, vd. .agency/attachments/1_1.jpg"}},
+            "required": ["path"],
+        },
+    },
     "write_file": {
         "description": "Tạo mới hoặc ghi đè toàn bộ một file. Dùng edit_file cho thay đổi nhỏ.",
         "input_schema": {
@@ -78,7 +87,7 @@ TOOL_SCHEMAS: dict[str, dict] = {
     },
     "run_command": {
         "description": (
-            "Chạy một lệnh trong thư mục dự án Laravel. Chỉ cho phép: 'php artisan <lệnh>' (trừ tinker/serve), "
+            "Chạy một lệnh trong thư mục dự án Laravel. Chỉ cho phép: 'php artisan <lệnh>' (trừ tinker/serve và các lệnh xoá DB như migrate:fresh/refresh/reset/rollback, db:wipe), "
             "'php -l <file>', 'php vendor/bin/phpunit', 'composer install|require|remove|dump-autoload|update', "
             "'npm install', 'npm run build'. Không dùng &&, |, >."
         ),
@@ -91,13 +100,18 @@ TOOL_SCHEMAS: dict[str, dict] = {
     "screenshot": {
         "description": (
             "Mở trang trên server xem trước của dự án và chụp màn hình để bạn xem giao diện. "
-            "Trả về ảnh, HTTP status, title và lỗi console."
+            "Trả về ảnh, HTTP status, title và lỗi console. Trang cần đăng nhập (vd. /admin/...): truyền thêm "
+            "login_path, login_email, login_password (tài khoản mẫu trong database/seeders) để công cụ đăng nhập "
+            "qua form trước rồi mới chụp."
         ),
         "input_schema": {
             "type": "object",
             "properties": {
                 "path": {"type": "string", "description": "Đường dẫn URL, ví dụ '/' hoặc '/menu'."},
                 "viewport": {"type": "string", "enum": ["desktop", "mobile"]},
+                "login_path": {"type": "string", "description": "Trang đăng nhập, vd. '/admin/dang-nhap' hoặc '/login'."},
+                "login_email": {"type": "string", "description": "Email/tên đăng nhập tài khoản mẫu."},
+                "login_password": {"type": "string", "description": "Mật khẩu tài khoản mẫu."},
             },
             "required": ["path", "viewport"],
         },
@@ -159,7 +173,7 @@ TOOL_SCHEMAS: dict[str, dict] = {
     },
 }
 
-READ_TOOLS = ["list_dir", "read_file", "search_files"]
+READ_TOOLS = ["list_dir", "read_file", "search_files", "view_image"]
 WRITE_TOOLS = ["write_file", "edit_file", "delete_file"]
 
 
@@ -214,6 +228,16 @@ def execute_tool(name: str, inp: dict, ctx: ToolContext) -> tuple[list[dict] | s
             return sb.read_file(inp["path"], inp.get("start_line"), inp.get("end_line")), False, inp["path"]
         if name == "search_files":
             return sb.search_files(inp["pattern"], inp.get("path", ".")), False, inp["pattern"]
+        if name == "view_image":
+            from ..attachments import image_block
+            p = sb.resolve(inp["path"])
+            if not p.is_file():
+                return f"Không có file {inp['path']}.", True, inp["path"]
+            try:
+                block = image_block(p)
+            except ValueError as e:
+                return str(e), True, inp["path"]
+            return [block, {"type": "text", "text": f"Ảnh: {sb.rel(p)}"}], False, inp["path"]
         if name == "write_file":
             msg = sb.write_file(inp["path"], inp["content"])
             ctx.on_file_changed(inp["path"], "write")
@@ -232,12 +256,16 @@ def execute_tool(name: str, inp: dict, ctx: ToolContext) -> tuple[list[dict] | s
         if name == "screenshot":
             from .browser_tools import take_screenshot
             url = ctx.get_preview_url()
-            img, info = take_screenshot(url, inp["path"], inp.get("viewport", "desktop"), ctx.screenshot_dir)
+            login = ({"path": inp.get("login_path"), "email": inp.get("login_email", ""),
+                      "password": inp.get("login_password", "")} if inp.get("login_email") else None)
+            img, info = take_screenshot(url, inp["path"], inp.get("viewport", "desktop"), ctx.screenshot_dir,
+                                        login=login)
             ctx.screenshots.append(img.name)
             data = base64.standard_b64encode(img.read_bytes()).decode()
             text = (f"URL: {url}{inp['path']} | viewport: {inp.get('viewport')} | HTTP {info['status']} | "
                     f"title: {info['title']!r} | lỗi console: {info['console_errors'] or 'không có'} | "
-                    f"file ảnh: {img.name}")
+                    + (f"đăng nhập: {info['login']} | trang cuối: {info['final_url']} | " if login else "")
+                    + f"file ảnh: {img.name}")
             return ([{"type": "image", "source": {"type": "base64", "media_type": "image/png", "data": data}},
                      {"type": "text", "text": text}], False, f"{inp['path']} ({inp.get('viewport')})")
         if name == "post_message":

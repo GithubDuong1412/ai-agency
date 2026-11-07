@@ -22,7 +22,8 @@
 - Mỗi thay đổi bảng là một migration mới; không sửa migration đã chạy. Sau khi tạo: `php artisan migrate --force`.
 - Cột hay lọc/tìm có index; khoá ngoại dùng `foreignId()->constrained()`.
 - Tránh N+1: dùng `with()` khi hiển thị quan hệ trong vòng lặp; phân trang danh sách dài (`paginate()`).
-- Seeder cho dữ liệu mẫu sát ngành (`php artisan db:seed --force`).
+- Seeder cho dữ liệu mẫu sát ngành (`php artisan db:seed --force`), phải chạy lại nhiều lần được: dùng `updateOrCreate`/`firstOrCreate` theo khoá cố định (slug, mã), không `truncate()`/`delete()` bảng, không đụng bản ghi khách tạo.
+- Sửa cấu trúc bảng bằng migration mới (thêm cột nullable/có default), không xoá rồi tạo lại DB.
 
 ## Kiểm thử
 - Mỗi route/form quan trọng có feature test: trang trả 200, gửi hợp lệ thì lưu DB, gửi sai thì có lỗi validate.

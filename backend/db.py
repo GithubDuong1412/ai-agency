@@ -64,8 +64,8 @@ CREATE TABLE IF NOT EXISTS reports (
 class DB:
     def __init__(self, path: Path | str | None = None):
         if path is None:
-            DATA_DIR.mkdir(parents=True, exist_ok=True)
             path = DATA_DIR / "agency.db"
+        Path(path).parent.mkdir(parents=True, exist_ok=True)
         self._conn = sqlite3.connect(str(path), check_same_thread=False)
         self._conn.row_factory = sqlite3.Row
         self._lock = threading.RLock()

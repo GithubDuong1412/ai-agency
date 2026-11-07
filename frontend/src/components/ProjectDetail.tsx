@@ -106,7 +106,7 @@ export function ProjectDetail({ id, data, reload, roles, events, onBack }: {
             <div className="md mt-3 text-sm text-slate-200"><Markdown>{N(report.content.summary_markdown)}</Markdown></div>
             {!!report.content.screenshots?.length && (
               <div className="mt-5">
-                <div className="label mb-2">Ảnh chụp QA / Kiểm duyệt</div>
+                <div className="label mb-2">Ảnh chụp vòng {report.run_no} · trang có giao diện thay đổi</div>
                 <div className="grid grid-cols-2 gap-3 md:grid-cols-3">
                   {report.content.screenshots.map(s => (
                     <a key={s} href={screenshotUrl(id, s)} target="_blank" rel="noreferrer" className="block overflow-hidden rounded-lg border border-white/10">

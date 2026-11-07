@@ -12,7 +12,7 @@ from fastapi.responses import FileResponse, StreamingResponse
 from fastapi.staticfiles import StaticFiles
 from pydantic import BaseModel
 
-from . import versions
+from . import attachments, versions
 from .agents import profiles
 from .agents import skills as skills_mod
 from .db import DB
@@ -46,10 +46,19 @@ app = FastAPI(title="AI Web Agency", lifespan=lifespan)
 
 class CommandIn(BaseModel):
     prompt: str
+    images: list[str] = []  # data URL ảnh Sếp đính kèm
 
 
 class FeedbackIn(BaseModel):
     feedback: str = ""
+    images: list[str] = []
+
+
+def _images(items: list[str]) -> list[tuple[bytes, str]]:
+    try:
+        return attachments.decode_images(items)
+    except ValueError as e:
+        raise HTTPException(400, str(e))
 
 
 def _project_or_404(pid: str) -> dict:
@@ -103,7 +112,7 @@ def api_overview():
 def create_project(body: CommandIn):
     if not body.prompt.strip():
         raise HTTPException(400, "Lệnh trống")
-    return _with_runtime(agency.start_project(body.prompt.strip()))
+    return _with_runtime(agency.start_project(body.prompt.strip(), _images(body.images)))
 
 
 @app.get("/api/projects/{pid}")
@@ -122,7 +131,7 @@ def stop_project(pid: str):
 @app.post("/api/projects/{pid}/approve")
 def approve_project(pid: str, body: FeedbackIn):
     _project_or_404(pid)
-    agency.approve(pid, body.feedback)
+    agency.approve(pid, body.feedback, _images(body.images))
     return {"ok": True}
 
 
@@ -132,7 +141,7 @@ def revise_project(pid: str, body: FeedbackIn):
     if not body.feedback.strip():
         raise HTTPException(400, "Hãy ghi góp ý cần sửa")
     try:
-        agency.revise(pid, body.feedback.strip())
+        agency.revise(pid, body.feedback.strip(), _images(body.images))
     except RuntimeError as e:
         raise HTTPException(409, str(e))
     return {"ok": True}
@@ -142,8 +151,9 @@ def revise_project(pid: str, body: FeedbackIn):
 def resume_project(pid: str, body: FeedbackIn):
     """Chạy lại dự án đã dừng/lỗi/gián đoạn."""
     p = _project_or_404(pid)
+    images = _images(body.images)
     try:
-        agency.revise(pid, body.feedback.strip() or "Tiếp tục hoàn thành dự án theo spec hiện có.") \
+        agency.revise(pid, body.feedback.strip() or "Tiếp tục hoàn thành dự án theo spec hiện có.", images) \
             if p["run_count"] else agency._spawn(pid, None)
     except RuntimeError as e:
         raise HTTPException(409, str(e))
@@ -185,6 +195,18 @@ def read_file(pid: str, path: str):
     except SandboxError as e:
         raise HTTPException(400, str(e))
     return {"path": path, "content": text}
+
+
+@app.get("/api/projects/{pid}/attachments/{name}")
+def attachment(pid: str, name: str):
+    _project_or_404(pid)
+    f = agency.attachment_path(pid, name)
+    media = attachments.media_type(f)
+    if "/" in name or "\\" in name or ".." in name or not media:
+        raise HTTPException(400, "Tên file không hợp lệ")
+    if not f.is_file():
+        raise HTTPException(404, "Không có ảnh")
+    return FileResponse(f, media_type=media)
 
 
 @app.get("/api/projects/{pid}/screenshots/{name}")

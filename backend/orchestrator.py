@@ -4,11 +4,12 @@ from __future__ import annotations
 import json
 import shutil
 import threading
+import time
 import traceback
 from pathlib import Path
 from typing import Any, Callable
 
-from . import versions
+from . import attachments, versions
 from .agents import profiles
 from .agents import skills as skills_mod
 from .agents.base import Agent, AgentCancelled, AgentError, AgentResult
@@ -76,29 +77,32 @@ class Agency:
         t = self._threads.get(pid)
         return bool(t and t.is_alive())
 
-    def start_project(self, prompt: str) -> dict:
+    def start_project(self, prompt: str, images: list[tuple[bytes, str]] | None = None) -> dict:
         p = self.db.create_project(prompt)
         self.bus.publish(p["id"], "project_created", None, title=p["title"], prompt=prompt)
-        self._spawn(p["id"], feedback=None)
+        names = self._attach(p["id"], images)
+        self._spawn(p["id"], feedback=None, images=names)
         return self.db.get_project(p["id"])  # type: ignore[return-value]
 
-    def revise(self, pid: str, feedback: str) -> None:
+    def revise(self, pid: str, feedback: str, images: list[tuple[bytes, str]] | None = None) -> None:
         if self.is_running(pid):
             raise RuntimeError("Dự án đang chạy.")
         for r in self.db.list_reports(pid):
             if r["status"] == "pending":
                 self.db.update_report(r["id"], status="revision_requested", feedback=feedback)
-        self.bus.publish(pid, "message", "owner", to="pm", text=feedback, kind="feedback")
-        self._spawn(pid, feedback=feedback)
+        names = self._attach(pid, images)
+        self.bus.publish(pid, "message", "owner", to="pm", text=feedback, kind="feedback", images=names)
+        self._spawn(pid, feedback=feedback, images=names)
 
-    def approve(self, pid: str, note: str = "") -> None:
+    def approve(self, pid: str, note: str = "", images: list[tuple[bytes, str]] | None = None) -> None:
         for r in self.db.list_reports(pid):
             if r["status"] == "pending":
                 self.db.update_report(r["id"], status="approved", feedback=note or None)
         self.db.update_project(pid, status="approved")
         self.bus.publish(pid, "project_status", None, status="approved")
-        if note:
-            self.bus.publish(pid, "message", "owner", to="all", text=note, kind="feedback")
+        names = self._attach(pid, images)
+        if note or names:
+            self.bus.publish(pid, "message", "owner", to="all", text=note, kind="feedback", images=names)
 
     def stop(self, pid: str) -> None:
         ev = self._stops.get(pid)
@@ -117,13 +121,28 @@ class Agency:
         return url
 
     # ---------- internals ----------
-    def _spawn(self, pid: str, feedback: str | None) -> None:
+    def _attach(self, pid: str, images: list[tuple[bytes, str]] | None) -> list[str]:
+        """Lưu ảnh Sếp đính kèm vào workspace. Dự án mới chưa có workspace (chép khung Laravel mất vài giây):
+        để tạm ở chỗ chờ, _run chuyển vào sau khi tạo workspace — để nút gửi không bị treo."""
+        if not images:
+            return []
+        ws = self.workspace(pid)
+        return attachments.save_attachments(ws if ws.exists() else self.incoming_dir(pid), images)
+
+    def incoming_dir(self, pid: str) -> Path:
+        return self.workspaces_dir / ".incoming" / pid
+
+    def attachment_path(self, pid: str, name: str) -> Path:
+        f = self.workspace(pid) / attachments.SUBDIR / name
+        return f if f.is_file() else self.incoming_dir(pid) / attachments.SUBDIR / name
+
+    def _spawn(self, pid: str, feedback: str | None, images: list[str] | None = None) -> None:
         with self._lock:
             if self.is_running(pid):
                 raise RuntimeError("Dự án đang chạy.")
             stop = threading.Event()
             self._stops[pid] = stop
-            t = threading.Thread(target=self._run_safe, args=(pid, feedback, stop), daemon=True,
+            t = threading.Thread(target=self._run_safe, args=(pid, feedback, stop, images or []), daemon=True,
                                  name=f"project-{pid}")
             self._threads[pid] = t
             self.db.update_project(pid, status="queued")
@@ -168,9 +187,10 @@ class Agency:
             run_skill_script=lambda name, script, args: skills_mod.run_script(role, name, script, args, ws),
         )
 
-    def _run_safe(self, pid: str, feedback: str | None, stop: threading.Event) -> None:
+    def _run_safe(self, pid: str, feedback: str | None, stop: threading.Event,
+                  images: list[str] | None = None) -> None:
         try:
-            self._run(pid, feedback, stop)
+            self._run(pid, feedback, stop, images or [])
         except AgentCancelled:
             self._snapshot(pid, "dừng giữa chừng")
             self.db.update_project(pid, status="stopped")
@@ -190,7 +210,8 @@ class Agency:
             versions.safe_commit(ws, f"Vòng {p['run_count']} ({note})", run_no=p["run_count"])
 
     # ---------- the pipeline ----------
-    def _run(self, pid: str, feedback: str | None, stop: threading.Event) -> None:
+    def _run(self, pid: str, feedback: str | None, stop: threading.Event,
+             images: list[str] | None = None) -> None:
         cfg = get_config()
         limits = cfg["limits"]
         project = self.db.get_project(pid)
@@ -200,6 +221,11 @@ class Agency:
 
         hooks = _ProjectHooks(self, pid, stop)
         ws = self._prepare_workspace(pid)
+        incoming = self.incoming_dir(pid)
+        if incoming.exists():  # ảnh đính kèm của dự án mới đang chờ workspace
+            shutil.copytree(incoming, ws, dirs_exist_ok=True)
+            shutil.rmtree(incoming, ignore_errors=True)
+        run_started_ms = int(time.time() * 1000)  # ảnh chụp trước mốc này thuộc vòng cũ
         # Lịch sử phiên bản: lưu hiện trạng (kể cả chỉnh tay của Sếp) trước khi đội bắt đầu vòng mới
         try:
             if versions.ensure_repo(ws):
@@ -209,6 +235,11 @@ class Agency:
         agent = lambda role: self._make_agent(role, self._ctx(pid, role, ws), hooks)  # noqa: E731
         handoff = lambda f, t, note: self.bus.publish(pid, "handoff", f, to=t, note=note)  # noqa: E731
         owner = cfg.get("owner_name", "Sếp")
+        # Ảnh Sếp đính kèm: PM và Designer nhận thẳng; người khác được báo đường dẫn để tự xem bằng view_image
+        images = images or []
+        img_kw = {"images": [ws / p for p in attachments.rel_paths(images)]} if images else {}
+        img_note = (f"\n\n{owner} đính kèm {len(images)} ảnh (xem bằng tool view_image nếu liên quan tới "
+                    "việc của bạn): " + ", ".join(attachments.rel_paths(images))) if images else ""
 
         # 1) Trưởng dự án lập kế hoạch
         prev = self.db.list_reports(pid)
@@ -219,8 +250,10 @@ class Agency:
                 plan_instr.append("Báo cáo lần trước:\n" + prev[0]["content"].get("summary_markdown", "")[:6000])
             plan_instr.append("Spec cũ nằm ở SPEC.md. Hãy cập nhật spec và chỉ tạo task cho phần cần sửa/bổ sung.")
         plan_instr.append("Hãy xem nhanh cấu trúc dự án nếu cần, rồi gọi submit_plan.")
-        self.bus.publish(pid, "message", "owner", to="pm", text=feedback or project["prompt"], kind="command")
-        plan = agent("pm").run("\n\n".join(plan_instr), "submit_plan").data
+        if not feedback:  # góp ý đã được revise() đăng thành tin "Góp ý", không đăng lặp lần nữa
+            self.bus.publish(pid, "message", "owner", to="pm", text=project["prompt"], kind="command",
+                             **({"images": images} if images else {}))
+        plan = agent("pm").run("\n\n".join(plan_instr), "submit_plan", **img_kw).data
 
         spec_md = (f"# {plan['project_title']}\n\n{plan['summary']}\n\n{plan['spec_markdown']}\n\n"
                    "## Tiêu chí chấp nhận\n" + "\n".join(f"- {c}" for c in plan["acceptance_criteria"]))
@@ -233,8 +266,9 @@ class Agency:
         handoff("pm", "designer", "Spec đã có trong SPEC.md, nhờ {@designer} lên thiết kế.")
         design_instr = ("Đọc SPEC.md rồi viết (hoặc cập nhật) DESIGN.md cho dự án."
                         + (f"\nGóp ý mới của {owner}: {feedback}" if feedback else "")
+                        + (f"\n{owner} có đính kèm ảnh (ở trên)." if images else "")
                         + "\nXong gọi submit_design.")
-        design = agent("designer").run(design_instr, "submit_design").data
+        design = agent("designer").run(design_instr, "submit_design", **img_kw).data
         self.bus.publish(pid, "design", "designer", **design)
 
         # 3) Dev ⇄ QA cho từng task
@@ -244,7 +278,7 @@ class Agency:
             self.bus.publish(pid, "task_update", "pm", task=t)
         log: list[dict] = []
         for t in tasks:
-            log.append(self._dev_qa(pid, t, agent, handoff, int(limits.get("qa_rounds", 3))))
+            log.append(self._dev_qa(pid, t, agent, handoff, int(limits.get("qa_rounds", 3)), img_note))
 
         # 4) Kiểm duyệt
         review: dict = {}
@@ -255,6 +289,7 @@ class Agency:
                 "Kiểm duyệt toàn bộ dự án theo SPEC.md (tiêu chí chấp nhận) và DESIGN.md. "
                 f"Lượt kiểm duyệt {r + 1}/{review_rounds + 1}.\n"
                 "Tóm tắt các task đã làm:\n" + json.dumps(log, ensure_ascii=False)[:8000]
+                + img_note + "\n" + (SHOT_RULE_REVISE if run_no > 1 else SHOT_RULE_FIRST)
                 + "\nXong gọi submit_review.", "submit_review").data
             self.bus.publish(pid, "review", "reviewer", **review, round=r + 1)
             if review["verdict"] == "approve" or not review["issues"] or r == review_rounds:
@@ -268,13 +303,13 @@ class Agency:
                 t = self.db.create_task(pid, f"Sửa theo kiểm duyệt (lượt {r + 1})", desc, assignee, "review", run_no)
                 self.bus.publish(pid, "task_update", "reviewer", task=t)
                 handoff("reviewer", assignee, f"Có {len(issues)} vấn đề cần sửa.")
-                log.append(self._dev_qa(pid, t, agent, handoff, int(limits.get("qa_rounds", 3))))
+                log.append(self._dev_qa(pid, t, agent, handoff, int(limits.get("qa_rounds", 3)), img_note))
 
         # 5) Báo cáo
         handoff("reviewer", "pm", "Kiểm duyệt xong, nhờ anh {@pm} tổng hợp báo cáo.")
         p = self.db.get_project(pid)
         preview_url = self.preview.url(pid)
-        shots = sorted(f.name for f in (ws / ".agency" / "screenshots").glob("*.png"))[-12:]
+        shots = run_screenshots(ws / ".agency" / "screenshots", run_started_ms)
         report_instr = (
             f"Viết báo cáo cuối cho {owner} bằng tiếng Việt, trung thực và dễ kiểm tra.\n"
             f"Dữ liệu:\n- Kế hoạch: {json.dumps(plan, ensure_ascii=False)[:5000]}\n"
@@ -300,7 +335,7 @@ class Agency:
         self.bus.publish(pid, "report", "pm", report_id=rep["id"], headline=report["headline"])
         self.bus.publish(pid, "project_status", None, status="awaiting_approval")
 
-    def _dev_qa(self, pid: str, task: dict, agent, handoff, qa_rounds: int) -> dict:
+    def _dev_qa(self, pid: str, task: dict, agent, handoff, qa_rounds: int, img_note: str = "") -> dict:
         dev_role = task["assignee"]
         feedback: list[dict] | None = None
         entry = {"task": task["title"], "assignee": dev_role, "attempts": 0, "passed": False}
@@ -309,7 +344,7 @@ class Agency:
             self.bus.publish(pid, "task_update", dev_role, task={**task, "status": "in_progress",
                                                                   "attempts": attempt})
             instr = (f"Task: {task['title']}\n\n{task['description']}\n\n"
-                     "Đọc SPEC.md, DESIGN.md và code hiện có trước khi làm.")
+                     "Đọc SPEC.md, DESIGN.md và code hiện có trước khi làm." + img_note)
             if feedback:
                 instr += ("\n\nQA báo các lỗi sau ở lần trước, hãy sửa hết:\n"
                           + "\n".join(f"- [{i['severity']}] {i['title']}: {i['detail']}" for i in feedback))
@@ -322,7 +357,7 @@ class Agency:
             qa = agent("qa").run(
                 f"Kiểm tra task: {task['title']}\n\n{task['description']}\n\n"
                 f"Dev báo cáo: {work['summary']}\nFile thay đổi: {', '.join(work['files_changed'])}\n"
-                f"Ghi chú cho QA: {work['notes_for_qa']}\nXong gọi submit_qa.", "submit_qa").data
+                f"Ghi chú cho QA: {work['notes_for_qa']}\n{SHOT_RULE_QA}\nXong gọi submit_qa.", "submit_qa").data
             entry.update(attempts=attempt, work=work["summary"], qa=qa["summary"], passed=qa["passed"],
                          issues=[i["title"] for i in qa["issues"]])
             if qa["passed"]:
@@ -335,6 +370,34 @@ class Agency:
         self.db.update_task(task["id"], status="needs_attention")
         self.bus.publish(pid, "task_update", "qa", task={**task, "status": "needs_attention"})
         return entry
+
+
+# Ảnh chụp hiện trong báo cáo cho Sếp: chỉ chụp cái thay đổi, không chụp lại trang cũ y hệt các vòng trước
+_SHOT_LOGIN = ("Trang cần đăng nhập (vd. /admin): truyền login_path, login_email, login_password (tài khoản mẫu "
+               "trong database/seeders) cho tool screenshot; ảnh vẫn là trang đăng nhập hoặc báo 'đăng nhập: thất bại' "
+               "thì không chụp lại nhiều lần, ghi rõ 'chưa xem bằng mắt' và kiểm bằng feature test.")
+SHOT_RULE_QA = ("Ảnh chụp: chỉ chụp trang có giao diện bị ảnh hưởng bởi các file thay đổi ở trên (view, layout, CSS), "
+                "mỗi trang desktop + mobile, không chụp lại cùng một trang nhiều lần. Task không đổi giao diện "
+                "(chỉ route/model/test) thì không chụp. " + _SHOT_LOGIN)
+SHOT_RULE_FIRST = "Ảnh chụp: chụp các trang chính (desktop + mobile), mỗi trang một lần. " + _SHOT_LOGIN
+SHOT_RULE_REVISE = ("Đây là vòng sửa theo góp ý: chỉ chụp các trang có giao diện thay đổi trong vòng này "
+                    "(xem file thay đổi trong nhật ký task), mỗi trang desktop + mobile; trang không đổi thì không "
+                    "chụp lại. Vòng này không đổi giao diện thì không chụp. " + _SHOT_LOGIN)
+
+
+def run_screenshots(shot_dir: Path, since_ms: int, limit: int = 8) -> list[str]:
+    """Ảnh chụp của vòng hiện tại: chỉ ảnh chụp sau since_ms; mỗi trang + khung (vd. home_mobile) giữ ảnh mới nhất.
+
+    Tên file dạng '<ms>_<trang>_<desktop|mobile>.png' (browser_tools.take_screenshot).
+    """
+    latest: dict[str, tuple[int, str]] = {}
+    for f in shot_dir.glob("*.png"):
+        ts, _, key = f.stem.partition("_")
+        if not ts.isdigit() or int(ts) < since_ms:
+            continue
+        if key not in latest or int(ts) > latest[key][0]:
+            latest[key] = (int(ts), f.name)
+    return [name for _, name in sorted(latest.values())][-limit:]
 
 
 def roster() -> list[dict]:

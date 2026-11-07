@@ -39,9 +39,11 @@ class DemoAgent:
         time.sleep(0.6)
         self.hooks.emit("tool", self.role, tool=tool, summary=summary, is_error=False)
 
-    def run(self, instruction: str, submit: str) -> AgentResult:
+    def run(self, instruction: str, submit: str, images=None) -> AgentResult:
         self.hooks.emit("agent_status", self.role, status="working")
         try:
+            if images:
+                self._say(f"Đã xem {len(images)} ảnh {{@owner}} đính kèm.")
             return AgentResult(getattr(self, submit)(instruction), 1)
         finally:
             self.hooks.emit("agent_status", self.role, status="idle")

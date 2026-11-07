@@ -3,6 +3,7 @@
 
 ## Stack kỹ thuật (bắt buộc)
 - Laravel 13, PHP 8.5, SQLite (`database/database.sqlite` có sẵn, `.env` đã cấu hình). Server xem trước do hệ thống chạy.
+- `database/database.sqlite` chứa dữ liệu thật Sếp/khách đã nhập khi xem trước (lịch đặt, đơn hàng…): KHÔNG xoá. Cấm `migrate:fresh/refresh/reset/rollback`, `db:wipe` (hệ thống chặn). Chỉ dùng `php artisan migrate --force`; cần dữ liệu sạch để kiểm tra thì dùng test (`php artisan test` chạy trên DB riêng trong bộ nhớ).
 - Giao diện: Blade + Tailwind CSS qua CDN `<script src="https://cdn.jsdelivr.net/npm/@tailwindcss/browser@4"></script>`.
   **Không dùng `@vite`**, không thêm bước build asset, không cài Livewire/FluxUI/React.
 - Layout chung `resources/views/layouts/app.blade.php`; mỗi trang một view; phần lặp lại là component Blade.

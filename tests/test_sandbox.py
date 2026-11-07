@@ -56,6 +56,9 @@ def test_allowed_commands(runner, cmd, expected):
     "php artisan tinker", "php artisan serve", "php -r \"echo 1;\"", "rm -rf .", "php artisan test && del x",
     "composer run-script evil", "npm run dev", "php -l ../outside.php", "powershell -c x", "php artisan test > out",
     "cmd /c dir", "php -l C:/x.php",
+    # xoá dữ liệu thật trong database.sqlite
+    "php artisan migrate:fresh --seed --force", "php artisan migrate:refresh", "php artisan migrate:reset",
+    "php artisan migrate:rollback", "php artisan DB:WIPE",
 ])
 def test_blocked_commands(runner, cmd):
     with pytest.raises(SandboxError):

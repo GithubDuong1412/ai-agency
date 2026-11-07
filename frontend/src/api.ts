@@ -50,14 +50,15 @@ export const api = {
   config: () => req<Config>('/api/config'),
   overview: () => req<Overview>('/api/overview'),
   project: (id: string) => req<{ project: Project; tasks: Task[]; reports: Report[] }>(`/api/projects/${id}`),
-  create: (prompt: string) => req<Project>('/api/projects', { method: 'POST', body: JSON.stringify({ prompt }) }),
+  create: (prompt: string, images: string[] = []) =>
+    req<Project>('/api/projects', { method: 'POST', body: JSON.stringify({ prompt, images }) }),
   stop: (id: string) => req(`/api/projects/${id}/stop`, { method: 'POST' }),
-  approve: (id: string, feedback = '') =>
-    req(`/api/projects/${id}/approve`, { method: 'POST', body: JSON.stringify({ feedback }) }),
-  revise: (id: string, feedback: string) =>
-    req(`/api/projects/${id}/revise`, { method: 'POST', body: JSON.stringify({ feedback }) }),
-  resume: (id: string, feedback = '') =>
-    req(`/api/projects/${id}/resume`, { method: 'POST', body: JSON.stringify({ feedback }) }),
+  approve: (id: string, feedback = '', images: string[] = []) =>
+    req(`/api/projects/${id}/approve`, { method: 'POST', body: JSON.stringify({ feedback, images }) }),
+  revise: (id: string, feedback: string, images: string[] = []) =>
+    req(`/api/projects/${id}/revise`, { method: 'POST', body: JSON.stringify({ feedback, images }) }),
+  resume: (id: string, feedback = '', images: string[] = []) =>
+    req(`/api/projects/${id}/resume`, { method: 'POST', body: JSON.stringify({ feedback, images }) }),
   preview: (id: string) => req<{ url: string }>(`/api/projects/${id}/preview`, { method: 'POST' }),
   versions: (id: string) => req<{ available: boolean; versions: Version[] }>(`/api/projects/${id}/versions`),
   versionDiff: (id: string, sha: string) => req<{ files: VersionFile[] }>(`/api/projects/${id}/versions/${sha}/diff`),
@@ -108,6 +109,7 @@ export const profilesApi = {
 }
 
 export const screenshotUrl = (pid: string, name: string) => `/api/projects/${pid}/screenshots/${name}`
+export const attachmentUrl = (pid: string, name: string) => `/api/projects/${pid}/attachments/${name}`
 
 export const STATUS_LABEL: Record<string, string> = {
   queued: 'Đang chờ', running: 'Đang làm', awaiting_approval: 'Chờ duyệt', approved: 'Đã duyệt',

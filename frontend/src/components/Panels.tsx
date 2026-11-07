@@ -3,7 +3,8 @@ import { ArrowLeftRight, ArrowRight, Check, ChevronUp, CircleAlert, PenLine, Ref
 import { useState } from 'react'
 import { api, timeAgo, type AgencyEvent, type Config, type Overview, type Project, type Report, type Role } from '../api'
 import type { AgentLive } from '../store'
-import { Avatar, Button, Empty, StatusPill } from './common'
+import { AttachButton, AttachThumbs, useAttachments } from './Attach'
+import { Avatar, Empty, StatusPill } from './common'
 
 /** Thẻ một báo cáo chờ duyệt: cả thẻ bấm được, kết luận có chữ + ký hiệu (không chỉ dựa vào màu). */
 export function PendingCard({ r, onOpen }: { r: Report; onOpen: () => void }) {
@@ -73,12 +74,14 @@ export function CommandBar({ onCreated, disabled, className = '' }: {
   const [err, setErr] = useState<string | null>(null)
   // Điện thoại: thu gọn thành một nút để không chiếm 1/4 màn hình; desktop luôn mở
   const [open, setOpen] = useState(false)
+  const att = useAttachments()
   const submit = async () => {
     if (!text.trim() || busy) return
     setBusy(true); setErr(null)
     try {
-      const p = await api.create(text.trim())
+      const p = await api.create(text.trim(), att.images)
       setText('')
+      att.clear()
       onCreated(p.id)
     } catch (e) {
       setErr((e as Error).message)
@@ -98,15 +101,18 @@ export function CommandBar({ onCreated, disabled, className = '' }: {
       <div className="mb-2 flex items-center gap-2 px-1">
         <span className="grid h-6 w-6 place-items-center rounded-md bg-teal-400/15"><Sparkles className="h-3.5 w-3.5 text-teal-300" aria-hidden="true" /></span>
         <label htmlFor="command-input" className="text-xs font-semibold uppercase tracking-[0.12em] text-slate-300">Chỉ huy AI · giao lệnh cho Trưởng dự án</label>
-        <span className="ml-auto text-[11px] text-muted max-sm:hidden">Ctrl + Enter để gửi · mỗi lệnh tạo một dự án mới</span>
+        <span className="ml-auto text-[11px] text-muted max-sm:hidden">Ctrl + Enter để gửi · dán/kéo ảnh vào ô · mỗi lệnh tạo một dự án mới</span>
         {open && <button onClick={() => setOpen(false)} className="ml-auto cursor-pointer px-2 py-1 text-xs text-slate-400 hover:text-white sm:hidden">Thu gọn</button>}
       </div>
+      <AttachThumbs a={att} disabled={busy} />
       {/* ô nhập nổi khối: nền sâu hơn panel, viền teal nhạt, sáng lên khi focus; nút gửi cao bằng ô nhập */}
-      <div className="flex items-stretch gap-2 rounded-xl border border-teal-400/25 bg-ink-950/80 p-1.5 shadow-inner shadow-black/40 transition focus-within:border-teal-300/60 focus-within:ring-2 focus-within:ring-teal-400/20">
+      <div {...att.dropProps} className={`flex items-stretch gap-2 rounded-xl border bg-ink-950/80 p-1.5 shadow-inner shadow-black/40 transition focus-within:border-teal-300/60 focus-within:ring-2 focus-within:ring-teal-400/20 ${att.dragging ? 'border-teal-300 ring-2 ring-teal-400/30' : 'border-teal-400/25'}`}>
         <textarea id="command-input" value={text} onChange={e => setText(e.target.value)} rows={2} autoFocus={open}
+          onPaste={att.onPaste}
           onKeyDown={e => { if (e.key === 'Enter' && (e.ctrlKey || e.metaKey)) submit() }}
           placeholder='Ví dụ: "Làm website Laravel cho tiệm bánh mì: trang chủ, menu, form đặt bàn lưu vào DB"'
           className="min-w-0 flex-1 resize-none bg-transparent px-2.5 py-2 text-[15px] leading-relaxed text-slate-100 outline-none placeholder:text-muted" />
+        <AttachButton a={att} disabled={busy} />
         <button type="button" onClick={submit} disabled={disabled || busy || !text.trim()} aria-label="Gửi lệnh"
           className="flex shrink-0 cursor-pointer items-center justify-center gap-2 self-stretch rounded-lg bg-teal-400 px-5 text-sm font-semibold text-ink-950 transition hover:bg-teal-300 active:scale-[0.97] disabled:cursor-not-allowed disabled:bg-teal-400/20 disabled:text-teal-100/50">
           <SendHorizontal className="h-4 w-4" aria-hidden="true" /><span className="max-sm:hidden">{busy ? 'Đang gửi…' : 'Giao lệnh'}</span>
@@ -117,6 +123,9 @@ export function CommandBar({ onCreated, disabled, className = '' }: {
   </>)
 }
 
+// Nút trong ô nhập của thanh đáy: cao bằng ô nhập, nhấn lún nhẹ, mờ khi chưa dùng được
+const BAR_BTN = 'flex shrink-0 cursor-pointer items-center justify-center gap-2 self-stretch rounded-lg px-4 text-sm font-semibold transition active:scale-[0.97] disabled:cursor-not-allowed disabled:opacity-40'
+
 /** Thanh đáy khi đang mở một dự án: Sếp duyệt / yêu cầu sửa / chỉnh sửa thêm cho CHÍNH dự án đó. */
 export function ProjectCommandBar({ project, report, onDone, className = '' }: {
   project: Project; report?: Report; onDone: () => void; className?: string
@@ -124,6 +133,7 @@ export function ProjectCommandBar({ project, report, onDone, className = '' }: {
   const [text, setText] = useState('')
   const [busy, setBusy] = useState(false)
   const [msg, setMsg] = useState<{ ok: boolean; text: string } | null>(null)
+  const att = useAttachments()
 
   const running = project.running
   const pending = report?.status === 'pending'
@@ -133,13 +143,14 @@ export function ProjectCommandBar({ project, report, onDone, className = '' }: {
   const run = async (fn: () => Promise<unknown>, ok: string) => {
     if (busy) return
     setBusy(true); setMsg(null)
-    try { await fn(); setText(''); setMsg({ ok: true, text: ok }); onDone() }
+    try { await fn(); setText(''); att.clear(); setMsg({ ok: true, text: ok }); onDone() }
     catch (e) { setMsg({ ok: false, text: (e as Error).message }) }
     finally { setBusy(false) }
   }
-  const revise = () => fb && run(() => api.revise(project.id, fb), 'Đã gửi yêu cầu, đội đang làm vòng mới.')
-  const resume = () => run(() => api.resume(project.id, fb), 'Đã chạy lại dự án.')
-  const approve = () => run(() => api.approve(project.id, fb), 'Đã duyệt dự án.')
+  const imgs = att.images
+  const revise = () => fb && run(() => api.revise(project.id, fb, imgs), 'Đã gửi yêu cầu, đội đang làm vòng mới.')
+  const resume = () => run(() => api.resume(project.id, fb, imgs), 'Đã chạy lại dự án.')
+  const approve = () => run(() => api.approve(project.id, fb, imgs), 'Đã duyệt dự án.')
   // Ctrl+Enter: hành động chính theo trạng thái
   const primary = halted ? resume : revise
 
@@ -149,35 +160,49 @@ export function ProjectCommandBar({ project, report, onDone, className = '' }: {
     : 'Muốn chỉnh sửa gì thêm? Ví dụ: "Đổi màu nút Đặt bàn sang đỏ, thêm Google Map ở trang chủ"'
 
   return (
-    <div className={`panel border-teal-400/20 p-3 ${className}`}>
-      <div className="flex items-start gap-3">
-        <PenLine className="mt-1 h-5 w-5 shrink-0 text-amber-300" aria-hidden="true" />
-        <div className="min-w-0 flex-1">
-          <div className="label truncate">Sếp · góp ý cho dự án “{project.title}”</div>
-          <textarea value={text} onChange={e => setText(e.target.value)} rows={2} disabled={running || busy}
-            aria-label={`Góp ý cho dự án ${project.title}`}
-            onKeyDown={e => { if (e.key === 'Enter' && (e.ctrlKey || e.metaKey)) primary() }}
-            placeholder={placeholder}
-            className="mt-1 w-full resize-none bg-transparent text-sm text-slate-100 outline-none placeholder:text-muted disabled:cursor-not-allowed" />
-          {msg && <div role="status" className={`text-xs ${msg.ok ? 'text-emerald-300' : 'text-rose-300'}`}>{msg.text}</div>}
-        </div>
-        {!running && (
-          <div className="mt-1 flex shrink-0 flex-wrap justify-end gap-2">
-            {pending ? <>
-              <Button variant="primary" onClick={approve} disabled={busy} className="h-10"><Check className="h-4 w-4" aria-hidden="true" />Duyệt</Button>
-              <Button variant="danger" onClick={revise} disabled={busy || !fb} className="h-10"><RotateCcw className="h-4 w-4" aria-hidden="true" />Yêu cầu sửa</Button>
-            </> : halted ? (
-              <Button variant="primary" onClick={resume} disabled={busy} className="h-10"><RefreshCw className="h-4 w-4" aria-hidden="true" />Chạy lại</Button>
-            ) : (
-              <Button variant="primary" onClick={revise} disabled={busy || !fb} className="h-10"><RotateCcw className="h-4 w-4" aria-hidden="true" />Gửi yêu cầu chỉnh sửa</Button>
-            )}
-          </div>
-        )}
+    <div className={`panel p-3 ${className}`}>
+      <div className="mb-2 flex items-center gap-2 px-1">
+        <span className="grid h-6 w-6 shrink-0 place-items-center rounded-md bg-amber-400/15"><PenLine className="h-3.5 w-3.5 text-amber-300" aria-hidden="true" /></span>
+        <label htmlFor="project-feedback" className="min-w-0 truncate text-xs font-semibold uppercase tracking-[0.12em] text-slate-300">
+          Góp ý cho dự án “{project.title}”
+        </label>
+        <span className="ml-auto shrink-0 text-[11px] text-muted max-md:hidden">
+          {running ? 'Thanh này mở lại khi đội làm xong' : 'Ctrl + Enter để gửi · dán/kéo ảnh vào ô · đội sửa trên code hiện tại'}
+        </span>
       </div>
-      <div className="mt-1 pl-9 text-[10px] text-muted">
-        {running ? 'Thanh này mở lại khi đội làm xong.'
-          : 'Ctrl + Enter để gửi. Đội làm vòng mới trên code hiện tại, chỉ sửa phần bạn nêu. Muốn tạo dự án mới thì quay lại Toàn cảnh.'}
+      <AttachThumbs a={att} disabled={busy || running} />
+      {/* cùng kiểu với thanh giao lệnh: ô nhập nổi khối, các nút cao bằng ô nhập */}
+      <div {...(running ? {} : att.dropProps)}
+        className={`flex items-stretch gap-2 rounded-xl border bg-ink-950/80 p-1.5 shadow-inner shadow-black/40 transition focus-within:ring-2 ${att.dragging
+        ? 'border-teal-300 ring-2 ring-teal-400/30'
+        : pending
+        ? 'border-amber-300/30 focus-within:border-amber-200/60 focus-within:ring-amber-300/20'
+        : 'border-teal-400/25 focus-within:border-teal-300/60 focus-within:ring-teal-400/20'} ${running ? 'opacity-60' : ''}`}>
+        <textarea id="project-feedback" value={text} onChange={e => setText(e.target.value)} rows={2} disabled={running || busy}
+          onPaste={att.onPaste}
+          onKeyDown={e => { if (e.key === 'Enter' && (e.ctrlKey || e.metaKey)) primary() }}
+          placeholder={placeholder}
+          className="min-w-0 flex-1 resize-none bg-transparent px-2.5 py-2 text-[15px] leading-relaxed text-slate-100 outline-none placeholder:text-muted disabled:cursor-not-allowed" />
+        {!running && <AttachButton a={att} disabled={busy} />}
+        {!running && (pending ? <>
+          <button type="button" onClick={approve} disabled={busy} className={`${BAR_BTN} bg-teal-400 text-ink-950 hover:bg-teal-300`}>
+            <Check className="h-4 w-4" aria-hidden="true" /><span className="max-sm:hidden">Duyệt</span>
+          </button>
+          <button type="button" onClick={revise} disabled={busy || !fb} title={fb ? undefined : 'Nhập góp ý trước khi yêu cầu sửa'}
+            className={`${BAR_BTN} bg-rose-500/15 text-rose-200 ring-1 ring-inset ring-rose-400/40 hover:bg-rose-500/25`}>
+            <RotateCcw className="h-4 w-4" aria-hidden="true" /><span className="max-sm:hidden">Yêu cầu sửa</span>
+          </button>
+        </> : halted ? (
+          <button type="button" onClick={resume} disabled={busy} className={`${BAR_BTN} bg-teal-400 text-ink-950 hover:bg-teal-300`}>
+            <RefreshCw className="h-4 w-4" aria-hidden="true" /><span className="max-sm:hidden">Chạy lại</span>
+          </button>
+        ) : (
+          <button type="button" onClick={revise} disabled={busy || !fb} className={`${BAR_BTN} bg-teal-400 text-ink-950 hover:bg-teal-300`}>
+            <SendHorizontal className="h-4 w-4" aria-hidden="true" /><span className="max-sm:hidden">{busy ? 'Đang gửi…' : 'Gửi yêu cầu'}</span>
+          </button>
+        ))}
       </div>
+      {msg && <div role="status" className={`mt-1.5 px-1 text-xs ${msg.ok ? 'text-emerald-300' : 'text-rose-300'}`}>{msg.text}</div>}
     </div>
   )
 }

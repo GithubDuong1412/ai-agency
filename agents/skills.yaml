@@ -1,9 +1,9 @@
 # Skill gán cho từng nhân viên (sửa trên dashboard: Hồ sơ nhân sự). Tên = thư mục trong skills/ hoặc ~/.claude/skills/
 designer:
-- ui-ux-pro-max
 - design-taste-frontend
+- ui-ux-pro-max
 frontend:
-- ui-ux-pro-max
 - design-taste-frontend
+- ui-ux-pro-max
 qa:
 - design-taste-frontend

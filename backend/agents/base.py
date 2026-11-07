@@ -6,14 +6,27 @@ dừng giữa chừng khi Sếp bấm Dừng, kiểm soát ngân sách token và
 from __future__ import annotations
 
 from dataclasses import dataclass
+from pathlib import Path
 from typing import Any, Callable, Protocol
 
+from ..attachments import image_block
 from ..settings import get_config, role_config
 from ..tools.registry import TOOL_SCHEMAS, ToolContext, execute_tool
 from . import skills as skills_mod
 from .profiles import load_profile
 from .roles import COMMON, FALLBACK_CONVENTIONS, ROLES
 from .schemas import SUBMIT_TOOLS, submit_tool_def
+
+
+def first_content(instruction: str, images: list[Path] | None = None) -> str | list[dict]:
+    """Tin nhắn giao việc: chỉ chữ, hoặc ảnh Sếp đính kèm trước rồi tới chữ (ảnh hỏng thì bỏ qua)."""
+    blocks: list[dict] = []
+    for p in images or []:
+        try:
+            blocks.append(image_block(p))
+        except (OSError, ValueError):
+            continue
+    return blocks + [{"type": "text", "text": instruction}] if blocks else instruction
 
 
 def build_system(role: str) -> str:
@@ -125,13 +138,13 @@ class Agent:
             return stream.get_final_message()
 
     # ---------- loop ----------
-    def run(self, instruction: str, submit: str) -> AgentResult:
+    def run(self, instruction: str, submit: str, images: list[Path] | None = None) -> AgentResult:
         if submit not in SUBMIT_TOOLS:
             raise ValueError(submit)
         submit_schema = SUBMIT_TOOLS[submit]["input_schema"]
         system = self._system()
         tools = self._tools(submit)
-        messages: list[dict] = [{"role": "user", "content": instruction}]
+        messages: list[dict] = [{"role": "user", "content": first_content(instruction, images)}]
         max_iter = int(self.cfg["limits"].get("max_tool_iterations", 40))
         nudges = 0
         emit: Callable[..., None] = lambda t, **d: self.hooks.emit(t, self.role, **d)
