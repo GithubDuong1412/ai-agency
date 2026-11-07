@@ -3,6 +3,7 @@ import { ChevronDown, ChevronRight, Wrench } from 'lucide-react'
 import { useEffect, useRef, useState } from 'react'
 import { attachmentUrl, clock, type AgencyEvent, type Role } from '../api'
 import { Avatar, Empty } from './common'
+import { useLightbox } from './Lightbox'
 
 const SHOWN = new Set(['message', 'handoff', 'plan', 'review', 'report', 'project_status', 'tool', 'design'])
 
@@ -130,6 +131,7 @@ export function Timeline({ events, roles, showTools = false, projectTitle }: {
   events: AgencyEvent[]; roles: Role[]; showTools?: boolean; projectTitle?: (id: string) => string
 }) {
   const ref = useRef<HTMLDivElement>(null)
+  const box = useLightbox()
   const roleBy = (k?: string | null) => roles.find(r => r.key === k)
   const filtered = events.filter(e => SHOWN.has(e.type) && (showTools || e.type !== 'tool')).slice(-400)
   const items = group(filtered)
@@ -137,6 +139,7 @@ export function Timeline({ events, roles, showTools = false, projectTitle }: {
   if (!items.length) return <Empty>Chưa có trao đổi nào. Giao việc ở ô "Chỉ huy AI" bên dưới.</Empty>
   return (
     <div ref={ref} className="flex max-h-[62vh] flex-col gap-2 overflow-y-auto pr-2 scroll-thin">
+      {box.view}
       {items.map(it => {
         if (it.kind === 'tools') return <ToolGroup key={`t${it.id}`} evs={it.evs} />
         if (it.kind === 'status') {
@@ -177,11 +180,12 @@ export function Timeline({ events, roles, showTools = false, projectTitle }: {
               {Array.isArray(ev.data.images) && ev.data.images.length > 0 && (
                 <div className="mt-2 flex flex-wrap gap-2">
                   {(ev.data.images as string[]).map((n, i) => (
-                    <a key={n} href={attachmentUrl(ev.project_id, n)} target="_blank" rel="noreferrer"
-                      className="block h-24 w-24 overflow-hidden rounded-lg border border-white/10 bg-ink-950 transition hover:border-teal-300/60">
+                    <button key={n} type="button" aria-label={`Xem lớn ảnh đính kèm ${i + 1}`}
+                      onClick={() => box.open(attachmentUrl(ev.project_id, n), `Ảnh đính kèm ${i + 1}`)}
+                      className="block h-24 w-24 cursor-zoom-in overflow-hidden rounded-lg border border-white/10 bg-ink-950 transition hover:border-teal-300/60">
                       <img src={attachmentUrl(ev.project_id, n)} alt={`Ảnh đính kèm ${i + 1}`} loading="lazy"
                         className="h-full w-full object-cover" />
-                    </a>
+                    </button>
                   ))}
                 </div>
               )}

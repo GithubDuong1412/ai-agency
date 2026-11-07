@@ -5,6 +5,7 @@ import Markdown from 'react-markdown'
 import { api, screenshotUrl, type AgencyEvent, type Role } from '../api'
 import type { ProjectData } from '../useProjectData'
 import { Button, Empty, StatusPill } from './common'
+import { useLightbox } from './Lightbox'
 import { TaskBoard } from './TaskBoard'
 import { Timeline } from './Timeline'
 import { Versions } from './Versions'
@@ -21,6 +22,7 @@ export function ProjectDetail({ id, data, reload, roles, events, onBack }: {
   const [openedPreview, setPreviewUrl] = useState<string | null>(null)
   const [frameKey, setFrameKey] = useState(0)
   const [reloading, setReloading] = useState(false)
+  const box = useLightbox()
   const pEvents = events.filter(e => e.project_id === id)
   const lastEventId = pEvents.length ? pEvents[pEvents.length - 1].id : 0
 
@@ -63,6 +65,7 @@ export function ProjectDetail({ id, data, reload, roles, events, onBack }: {
 
   return (
     <div className="flex flex-col gap-4">
+      {box.view}
       <div className="panel p-4">
         <div className="flex flex-wrap items-start gap-3">
           <Button onClick={onBack}><ArrowLeft className="h-3.5 w-3.5" aria-hidden="true" />Quay lại</Button>
@@ -109,10 +112,11 @@ export function ProjectDetail({ id, data, reload, roles, events, onBack }: {
                 <div className="label mb-2">Ảnh chụp vòng {report.run_no} · trang có giao diện thay đổi</div>
                 <div className="grid grid-cols-2 gap-3 md:grid-cols-3">
                   {report.content.screenshots.map(s => (
-                    <a key={s} href={screenshotUrl(id, s)} target="_blank" rel="noreferrer" className="block overflow-hidden rounded-lg border border-white/10">
-                      <img src={screenshotUrl(id, s)} alt={s} className="h-40 w-full object-cover object-top" />
+                    <button key={s} type="button" onClick={() => box.open(screenshotUrl(id, s), s)} aria-label={`Xem lớn ảnh ${s}`}
+                      className="block cursor-zoom-in overflow-hidden rounded-lg border border-white/10 text-left transition hover:border-teal-300/60">
+                      <img src={screenshotUrl(id, s)} alt={s} loading="lazy" className="h-40 w-full object-cover object-top" />
                       <div className="truncate bg-ink-850 px-2 py-1 text-[10px] text-muted">{s}</div>
-                    </a>
+                    </button>
                   ))}
                 </div>
               </div>
