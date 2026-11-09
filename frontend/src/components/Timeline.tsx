@@ -135,9 +135,12 @@ function ToolGroup({ evs }: { evs: AgencyEvent[] }) {
 export type OlderPaging = { hasMore: boolean; loading: boolean; loaded: boolean; load: () => void }
 const NEAR_TOP = 200  // px: còn cách đầu bao nhiêu thì tải trước
 
-export function Timeline({ events, roles, showTools = false, projectTitle, limit = 400, older }: {
+/** Người đang làm / đang suy nghĩ: hiện avatar + 3 chấm ở cuối hội thoại */
+export type TypingAgent = { role: Role; thinking: boolean }
+
+export function Timeline({ events, roles, showTools = false, projectTitle, limit = 400, older, typing }: {
   events: AgencyEvent[]; roles: Role[]; showTools?: boolean; projectTitle?: (id: string) => string
-  limit?: number; older?: OlderPaging
+  limit?: number; older?: OlderPaging; typing?: TypingAgent[]
 }) {
   const ref = useRef<HTMLDivElement>(null)
   const box = useLightbox()
@@ -166,6 +169,13 @@ export function Timeline({ events, roles, showTools = false, projectTitle, limit
     else el.scrollTo({ top: el.scrollHeight, behavior: 'smooth' })
   }, [lastId, settled])
 
+  const typingKey = (typing || []).map(t => `${t.role.key}:${t.thinking}`).join(',')
+  useLayoutEffect(() => {
+    const el = ref.current
+    if (!el || !typingKey) return
+    if (el.scrollHeight - el.scrollTop - el.clientHeight < 160) el.scrollTo({ top: el.scrollHeight, behavior: 'smooth' })
+  }, [typingKey])
+
   const maybeLoadOlder = () => {
     const el = ref.current
     if (!el || !older || !older.loaded || !older.hasMore || older.loading || anchor.current) return
@@ -180,7 +190,7 @@ export function Timeline({ events, roles, showTools = false, projectTitle, limit
   // Sau mỗi lần tải: khung chưa đủ dài để cuộn (trang toàn thao tác bị gộp) hoặc vẫn ở gần đầu thì tải tiếp
   useEffect(() => { maybeLoadOlder() })  // eslint-disable-line react-hooks/exhaustive-deps
 
-  if (!items.length) {
+  if (!items.length && !typing?.length) {
     if (older && (!older.loaded || older.loading)) return <Empty>Đang tải hội thoại…</Empty>
     return <Empty>Chưa có trao đổi nào. Giao việc ở ô "Chỉ huy AI" bên dưới.</Empty>
   }
@@ -248,6 +258,22 @@ export function Timeline({ events, roles, showTools = false, projectTitle, limit
           </div>
         )
       })}
+      {typing?.map(t => (
+        <div key={t.role.key} className="mt-2 flex gap-3" aria-live="polite">
+          <div className="w-9 shrink-0"><Avatar role={t.role} size={36} /></div>
+          <div className="min-w-0">
+            <div className="mb-1 flex items-baseline gap-2 text-[13px] text-muted">
+              <span className="text-[15px] font-semibold text-slate-100">{t.role.name}</span>
+              <span>{t.thinking ? 'đang suy nghĩ…' : 'đang làm…'}</span>
+            </div>
+            <div className="inline-flex items-center gap-1 rounded-2xl rounded-tl-sm bg-white/[0.07] px-3 py-2.5" aria-label={`${t.role.name} ${t.thinking ? 'đang suy nghĩ' : 'đang làm'}`}>
+              <span className="typing-dot h-2 w-2 rounded-full bg-slate-300" />
+              <span className="typing-dot h-2 w-2 rounded-full bg-slate-300 [animation-delay:.15s]" />
+              <span className="typing-dot h-2 w-2 rounded-full bg-slate-300 [animation-delay:.3s]" />
+            </div>
+          </div>
+        </div>
+      ))}
     </div>
   )
 }

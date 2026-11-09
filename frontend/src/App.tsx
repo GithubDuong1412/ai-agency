@@ -12,6 +12,7 @@ import { Header, MobileNav, Sidebar, type View } from './components/Shell'
 import { StatCards } from './components/StatCards'
 import { TaskBoard } from './components/TaskBoard'
 import { Timeline } from './components/Timeline'
+import { typingIn } from './components/typing'
 import { useAgency } from './store'
 import { useProjectData } from './useProjectData'
 
@@ -168,7 +169,7 @@ export default function App() {
   if (view.kind === 'profiles') {
     main = <Profiles initialScope={view.scope} onScopeChange={scope => setView({ kind: 'profiles', scope })} />
   } else if (view.kind === 'project') {
-    main = <ProjectDetail id={view.id} data={projectData} reload={reloadProject} roles={roles} events={events}
+    main = <ProjectDetail id={view.id} data={projectData} reload={reloadProject} roles={roles} events={events} live={live}
       onBack={() => setView({ kind: 'overview' })} />
   } else if (view.kind === 'tasks') {
     main = <div className="panel p-4"><TaskBoard tasks={overview?.tasks || []} roles={roles} projects={projects} onOpenProject={openProject} /></div>
@@ -238,7 +239,7 @@ export default function App() {
       <div className="flex flex-col gap-4">
         <StatCards overview={overview} live={live} />
         <div className="flex">{modeToggle}</div>
-        {mode === 'chat' && <div className="panel p-4"><Timeline events={events} roles={roles} projectTitle={projectTitle} /></div>}
+        {mode === 'chat' && <div className="panel p-4"><Timeline events={events} roles={roles} projectTitle={projectTitle} typing={typingIn(live, roles)} /></div>}
         {mode === 'list' && <div className="panel p-4"><TaskBoard tasks={overview?.tasks || []} roles={roles} projects={projects} onOpenProject={openProject} /></div>}
         {pickedPanel}
         <HandoffTicker events={events} roles={roles} />

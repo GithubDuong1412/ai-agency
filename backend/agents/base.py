@@ -176,6 +176,7 @@ class Agent:
                 if self.hooks.over_budget():
                     raise AgentError("Đã vượt ngân sách token của dự án (limits.token_budget).")
 
+                emit("agent_status", status="thinking")  # dashboard: đám mây "…" khi chờ model trả lời
                 resp = self._call(system, tools, messages)
                 self.hooks.add_usage(resp.model, resp.usage)
 
@@ -199,6 +200,7 @@ class Agent:
                                      f"Bạn chưa nộp kết quả. Hãy hoàn tất và gọi tool {submit}."})
                     continue
 
+                emit("agent_status", status="working")  # đang thao tác (chạy tool): gõ phím, màn hình chạy chữ
                 truncated = resp.stop_reason == "max_tokens"
                 results: list[dict] = []
                 submitted: dict | None = None

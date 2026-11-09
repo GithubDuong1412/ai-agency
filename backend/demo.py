@@ -28,15 +28,17 @@ class DemoAgent:
     def __init__(self, role, ctx, hooks, state):
         self.role, self.ctx, self.hooks, self.state = role, ctx, hooks, state
 
-    def _say(self, text: str, wait: float = 1.2):
+    def _say(self, text: str, wait: float = 1.6):
+        self.hooks.emit("agent_status", self.role, status="thinking")  # như Agent thật: chờ model trả lời
         for _ in range(int(wait / 0.1)):
             if self.hooks.should_stop():
                 raise AgentCancelled()
             time.sleep(0.1)
         self.hooks.emit("message", self.role, text=text, to="all", kind="note")
+        self.hooks.emit("agent_status", self.role, status="working")
 
     def _tool(self, tool: str, summary: str):
-        time.sleep(0.6)
+        time.sleep(0.9)
         self.hooks.emit("tool", self.role, tool=tool, summary=summary, is_error=False)
 
     def run(self, instruction: str, submit: str, images=None) -> AgentResult:

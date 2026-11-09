@@ -6,6 +6,8 @@ import { api, screenshotUrl, type AgencyEvent, type Role } from '../api'
 import type { ProjectData } from '../useProjectData'
 import { Button, Empty, StatusPill } from './common'
 import { useLightbox } from './Lightbox'
+import { typingIn } from './typing'
+import type { AgentLive } from '../store'
 import { useProjectHistory } from '../useProjectHistory'
 import { TaskBoard } from './TaskBoard'
 import { Timeline } from './Timeline'
@@ -13,8 +15,9 @@ import { Versions } from './Versions'
 
 type Tab = 'report' | 'chat' | 'tasks' | 'versions' | 'files' | 'preview' | 'spec'
 
-export function ProjectDetail({ id, data, reload, roles, events, onBack }: {
-  id: string; data: ProjectData | null; reload: () => void; roles: Role[]; events: AgencyEvent[]; onBack: () => void
+export function ProjectDetail({ id, data, reload, roles, events, live, onBack }: {
+  id: string; data: ProjectData | null; reload: () => void; roles: Role[]; events: AgencyEvent[]
+  live: Record<string, AgentLive>; onBack: () => void
 }) {
   const [tab, setTab] = useState<Tab>('chat')
   const [msg, setMsg] = useState<string | null>(null)
@@ -103,6 +106,7 @@ export function ProjectDetail({ id, data, reload, roles, events, onBack }: {
       {tab === 'chat' && (
         <div className="panel p-4">
           <Timeline key={id} events={history.events} roles={roles} showTools limit={Infinity}
+            typing={typingIn(live, roles, id)}
             older={{ hasMore: history.hasMore, loading: history.loadingOlder, loaded: history.loaded, load: history.loadOlder }} />
         </div>
       )}

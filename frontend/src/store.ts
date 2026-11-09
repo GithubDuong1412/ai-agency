@@ -3,6 +3,8 @@ import { api, type AgencyEvent, type Config, type Overview } from './api'
 
 export type AgentLive = {
   status: 'idle' | 'working'
+  /** đang chờ model trả lời (đám mây "…" / dấu 3 chấm); false = đang thao tác (chạy tool) */
+  thinking?: boolean
   projectId?: string
   lastText?: string
   lastAt?: number
@@ -64,7 +66,9 @@ export function useAgency() {
       if (!ev.agent || ev.agent === 'owner') continue
       const a = (m[ev.agent] ||= { status: 'idle' })
       if (ev.type === 'agent_status') {
-        a.status = ev.data.status
+        // backend: thinking (chờ model) | working (chạy tool) | idle; nơi khác chỉ cần biết có đang làm không
+        a.status = ev.data.status === 'idle' ? 'idle' : 'working'
+        a.thinking = ev.data.status === 'thinking'
         a.projectId = ev.project_id
       } else if (ev.type === 'message') {
         a.lastText = ev.data.text
@@ -76,7 +80,7 @@ export function useAgency() {
     }
     // dự án bị dừng / lỗi → mọi người về trạng thái rảnh
     const running = new Set(overview?.projects.filter(p => p.running).map(p => p.id))
-    for (const a of Object.values(m)) if (a.projectId && !running.has(a.projectId)) a.status = 'idle'
+    for (const a of Object.values(m)) if (a.projectId && !running.has(a.projectId)) { a.status = 'idle'; a.thinking = false }
     return m
   }, [events, overview])
 
