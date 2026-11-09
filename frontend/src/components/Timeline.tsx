@@ -1,6 +1,6 @@
 import { fillNames } from '../names'
-import { ChevronDown, ChevronRight, Wrench } from 'lucide-react'
-import { useEffect, useRef, useState } from 'react'
+import { ChevronDown, ChevronRight, Loader2, Wrench } from 'lucide-react'
+import { useEffect, useLayoutEffect, useRef, useState } from 'react'
 import { attachmentUrl, clock, type AgencyEvent, type Role } from '../api'
 import { Avatar, Empty } from './common'
 import { useLightbox } from './Lightbox'
@@ -12,12 +12,14 @@ type Badge = { label: string; cls: string }
 const B = {
   command: { label: 'Giao việc', cls: 'bg-amber-400/10 text-amber-200' },
   feedback: { label: 'Góp ý', cls: 'bg-amber-400/10 text-amber-200' },
+  interject: { label: 'Nhắn chen ngang', cls: 'bg-sky-400/10 text-sky-200' },
   handoff: { label: 'Bàn giao', cls: 'bg-sky-400/10 text-sky-200' },
   plan: { label: 'Kế hoạch', cls: 'bg-teal-400/10 text-teal-200' },
   design: { label: 'Thiết kế', cls: 'bg-sky-400/10 text-sky-200' },
   approve: { label: 'Duyệt', cls: 'bg-emerald-400/10 text-emerald-300' },
   changes: { label: 'Yêu cầu sửa', cls: 'bg-rose-400/10 text-rose-300' },
   report: { label: 'Báo cáo', cls: 'bg-amber-400/10 text-amber-200' },
+  lessons: { label: 'Bài học rút ra', cls: 'bg-violet-400/10 text-violet-200' },
 } satisfies Record<string, Badge>
 
 const STATUS: Record<string, string> = {
@@ -38,6 +40,8 @@ function describe(ev: AgencyEvent, roleBy: (k?: string | null) => Role | undefin
     case 'message':
       if (d.kind === 'command') return { text: d.text, badge: B.command }
       if (d.kind === 'feedback') return { text: d.text, badge: B.feedback }
+      if (d.kind === 'interject') return { text: d.text, badge: B.interject }
+      if (d.kind === 'lessons') return { text: '\n' + d.text, badge: B.lessons }
       return { text: (d.to && d.to !== 'all' ? `@${roleBy(d.to)?.name || d.to} ` : '') + d.text }
     case 'handoff':
       return { text: d.note, badge: { ...B.handoff, label: `Bàn giao → ${roleBy(d.to)?.name || d.to}` } }
@@ -127,19 +131,70 @@ function ToolGroup({ evs }: { evs: AgencyEvent[] }) {
   )
 }
 
-export function Timeline({ events, roles, showTools = false, projectTitle }: {
+/** Tải tin cũ khi cuộn lên (tab Hội thoại của dự án) */
+export type OlderPaging = { hasMore: boolean; loading: boolean; loaded: boolean; load: () => void }
+const NEAR_TOP = 200  // px: còn cách đầu bao nhiêu thì tải trước
+
+export function Timeline({ events, roles, showTools = false, projectTitle, limit = 400, older }: {
   events: AgencyEvent[]; roles: Role[]; showTools?: boolean; projectTitle?: (id: string) => string
+  limit?: number; older?: OlderPaging
 }) {
   const ref = useRef<HTMLDivElement>(null)
   const box = useLightbox()
   const roleBy = (k?: string | null) => roles.find(r => r.key === k)
-  const filtered = events.filter(e => SHOWN.has(e.type) && (showTools || e.type !== 'tool')).slice(-400)
+  const filtered = events.filter(e => SHOWN.has(e.type) && (showTools || e.type !== 'tool')).slice(-limit)
   const items = group(filtered)
-  useEffect(() => { ref.current?.scrollTo({ top: ref.current.scrollHeight, behavior: 'smooth' }) }, [filtered.length])
-  if (!items.length) return <Empty>Chưa có trao đổi nào. Giao việc ở ô "Chỉ huy AI" bên dưới.</Empty>
+  const firstId = filtered[0]?.id ?? 0
+  const lastId = filtered[filtered.length - 1]?.id ?? 0
+
+  // Mốc giữ chỗ đang đọc khi tin cũ chèn lên trên
+  const anchor = useRef<{ height: number; top: number; firstId: number } | null>(null)
+  const didInitialScroll = useRef(false)
+  useLayoutEffect(() => {
+    const el = ref.current
+    if (!el || !anchor.current || anchor.current.firstId === firstId) return
+    el.scrollTop = anchor.current.top + (el.scrollHeight - anchor.current.height)
+    anchor.current = null
+  }, [firstId])
+  // Tin mới nhất thay đổi (không phải nạp tin cũ) thì cuộn xuống cuối; lần đầu nhảy thẳng, sau đó cuộn mượt
+  // (lịch sử dự án chưa tải xong thì chưa tính là lần đầu, để khi trang mới nhất về vẫn nhảy xuống cuối)
+  const settled = !older || older.loaded
+  useLayoutEffect(() => {
+    const el = ref.current
+    if (!el || !lastId) return
+    if (!didInitialScroll.current) { el.scrollTop = el.scrollHeight; didInitialScroll.current = settled }
+    else el.scrollTo({ top: el.scrollHeight, behavior: 'smooth' })
+  }, [lastId, settled])
+
+  const maybeLoadOlder = () => {
+    const el = ref.current
+    if (!el || !older || !older.loaded || !older.hasMore || older.loading || anchor.current) return
+    if (el.scrollTop > NEAR_TOP) return
+    anchor.current = { height: el.scrollHeight, top: el.scrollTop, firstId }
+    older.load()
+  }
+  // Tải xong mà không có tin cũ mới (lỗi mạng, hoặc chỉ toàn loại bị ẩn) thì bỏ mốc để lần sau thử lại
+  useEffect(() => {
+    if (older && !older.loading && anchor.current?.firstId === firstId) anchor.current = null
+  }, [older?.loading])  // eslint-disable-line react-hooks/exhaustive-deps
+  // Sau mỗi lần tải: khung chưa đủ dài để cuộn (trang toàn thao tác bị gộp) hoặc vẫn ở gần đầu thì tải tiếp
+  useEffect(() => { maybeLoadOlder() })  // eslint-disable-line react-hooks/exhaustive-deps
+
+  if (!items.length) {
+    if (older && (!older.loaded || older.loading)) return <Empty>Đang tải hội thoại…</Empty>
+    return <Empty>Chưa có trao đổi nào. Giao việc ở ô "Chỉ huy AI" bên dưới.</Empty>
+  }
   return (
-    <div ref={ref} className="flex max-h-[62vh] flex-col gap-2 overflow-y-auto pr-2 scroll-thin">
+    <div ref={ref} onScroll={older ? maybeLoadOlder : undefined}
+      className="flex max-h-[62vh] flex-col gap-2 overflow-y-auto pr-2 scroll-thin">
       {box.view}
+      {older && (
+        <div aria-live="polite" className="flex items-center justify-center gap-2 py-2 text-[13px] text-muted">
+          {older.loading ? <><Loader2 className="h-3.5 w-3.5 animate-spin" aria-hidden="true" />Đang tải tin cũ hơn…</>
+            : older.hasMore ? <span className="opacity-0">·</span>
+            : <>Đầu cuộc hội thoại · {clock(filtered[0].created_at)} {new Date(filtered[0].created_at * 1000).toLocaleDateString('vi-VN')}</>}
+        </div>
+      )}
       {items.map(it => {
         if (it.kind === 'tools') return <ToolGroup key={`t${it.id}`} evs={it.evs} />
         if (it.kind === 'status') {

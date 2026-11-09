@@ -93,3 +93,34 @@ def test_invalid_submit_is_rejected(tmp_path):
     assert res.data["passed"] is True
     err = client.requests[1]["messages"][-1]["content"][0]
     assert err["is_error"] and "tests_run" in err["content"]
+
+
+def test_owner_notes_at_start_and_mid_run(tmp_path):
+    ctx = ToolContext(sandbox=Sandbox(tmp_path), runner=CommandRunner(tmp_path, "php", "c.phar"),
+                      screenshot_dir=tmp_path / "s", get_preview_url=lambda: "", post_message=lambda to, t: None)
+    notes = [{"text": "Dùng màu xanh rêu", "images": [], "delivered": False}]
+
+    class NoteHooks(Hooks):
+        def owner_notes(self):
+            return list(notes)
+
+    class NoteClient(FakeClient):
+        def _stream(self, **params):
+            if len(self.requests) == 0:  # Sếp nhắn thêm trong lúc agent đang làm lượt đầu
+                notes.append({"text": "Đổi nút sang đỏ", "images": [], "delivered": False})
+            return super()._stream(**params)
+
+    client = NoteClient([
+        msg([NS(type="tool_use", id="t1", name="write_file", input={"path": "DESIGN.md", "content": "# D"})]),
+        msg([NS(type="tool_use", id="t2", name="submit_design",
+                input={"summary": "ok", "pages": ["/"], "palette": ["#000"], "fonts": ["Inter"]})]),
+    ])
+    hooks = NoteHooks()
+    Agent("designer", client, ctx, hooks).run("Thiết kế", "submit_design")
+    first = client.requests[0]["messages"][0]["content"]
+    assert "Dùng màu xanh rêu" in first and "Đổi nút sang đỏ" not in first
+    second = client.requests[1]["messages"][-1]["content"]
+    assert second[0]["type"] == "tool_result" and second[-1]["type"] == "text"
+    assert "Đổi nút sang đỏ" in second[-1]["text"] and "Dùng màu xanh rêu" not in second[-1]["text"]
+    assert all(n["delivered"] for n in notes)
+    assert any(e[0] == "message" and "lời nhắn mới" in e[2]["text"] for e in hooks.events)

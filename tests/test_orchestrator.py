@@ -52,6 +52,10 @@ class FakeAgent:
                                                                  "assignee": "frontend", "severity": "low"}]}, 1)
             return AgentResult({"verdict": "approve", "score": 9, "summary": "tốt", "strengths": ["a"],
                                 "issues": []}, 1)
+        if submit == "submit_lessons":
+            return AgentResult({"lessons": [
+                {"role": "backend", "text": "Viết test bằng PHPUnit dạng class, không dùng Pest."},
+                {"role": "team", "text": "Không chạy migrate:fresh trên database thật."}]}, 1)
         if submit == "submit_report":
             return AgentResult({"headline": "Xong", "summary_markdown": "# Báo cáo", "how_to_check": ["mở /"],
                                 "known_issues": [], "next_steps": []}, 1)
@@ -72,7 +76,9 @@ def make_agency(tmp_path):
     state = {"qa": 0, "review": 0}
     agency = Agency(db, EventBus(db), preview=FakePreview(),
                     agent_factory=lambda role, ctx, hooks: FakeAgent(role, ctx, hooks, state),
-                    workspaces_dir=tmp_path / "ws", skeleton_dir=skel)
+                    workspaces_dir=tmp_path / "ws", skeleton_dir=skel, agents_dir=tmp_path / "agents")
+    for scope in ("_team", "pm", "designer", "frontend", "backend", "qa", "reviewer"):
+        (tmp_path / "agents" / scope).mkdir(parents=True)
     return agency, db
 
 
@@ -93,6 +99,7 @@ def test_full_pipeline(tmp_path):
 
     roles = [c[0] for c in FakeAgent.calls]
     assert roles[0] == "pm" and roles[-1] == "pm"
+    assert FakeAgent.calls[-1] == ("pm", "submit_lessons")  # QA trượt + Kiểm duyệt trả sửa → rút bài học
     assert roles.count("reviewer") == 2
 
     reports = db.list_reports(p["id"])
@@ -174,3 +181,80 @@ def test_attached_images_reach_pm_and_designer(tmp_path):
     assert ".agency/attachments/" in seen["reviewer"][0][1]
     cmd = [e for e in db.list_events(p["id"]) if e["type"] == "message" and e["data"].get("kind") == "command"]
     assert cmd[0]["data"]["images"] == [pm_imgs[0].name]
+
+
+def test_lessons_written_deduped_and_skipped_when_smooth(tmp_path):
+    from backend.agents import profiles
+    agency, db = make_agency(tmp_path)
+    p = agency.start_project("Làm web")
+    _wait(agency, p["id"])
+    backend = profiles.lessons_of("backend", tmp_path / "agents")
+    team = profiles.lessons_of("_team", tmp_path / "agents")
+    assert len(backend) == 1 and "PHPUnit" in backend[0] and "(Tiệm bánh," in backend[0]
+    assert len(team) == 1 and "migrate:fresh" in team[0]
+    msgs = [e for e in db.list_events(p["id"]) if e["type"] == "message" and e["data"].get("kind") == "lessons"]
+    assert len(msgs) == 1 and "[backend]" in msgs[0]["data"]["text"]
+    # agent của vai đó thấy bài học trong prompt
+    prof = profiles.load_profile("backend", tmp_path / "agents")
+    assert "PHPUnit" in prof.prompt_section() and "migrate:fresh" in prof.prompt_section()
+
+    # vòng sửa: cùng bài học → không ghi trùng
+    agency.revise(p["id"], "Đổi màu")
+    _wait(agency, p["id"])
+    assert len(profiles.lessons_of("backend", tmp_path / "agents")) == 1
+
+    # dự án trơn tru (QA đạt ngay, Kiểm duyệt duyệt ngay, không góp ý) → không tốn lượt rút bài học
+    FakeAgent.calls = []
+    agency._agent_factory = lambda role, ctx, hooks: FakeAgent(role, ctx, hooks, {"qa": 1, "review": 1})
+    p2 = agency.start_project("Trơn tru")
+    _wait(agency, p2["id"])
+    assert ("pm", "submit_lessons") not in FakeAgent.calls
+
+
+def test_append_lessons_cap_and_keeps_owner_text(tmp_path):
+    from backend.agents import profiles
+    (tmp_path / "qa").mkdir()
+    f = tmp_path / "qa" / "lessons.md"
+    f.write_text("# Bài học\nGhi chú của Sếp\n- Bài học Sếp tự viết đầu tiên\n", encoding="utf-8")
+    for i in range(profiles.MAX_LESSONS + 5):
+        profiles.append_lessons("qa", [f"Bài học số {i} cần nhớ kỹ"], "Dự án", tmp_path)
+    text = f.read_text(encoding="utf-8")
+    lines = profiles.lessons_of("qa", tmp_path)
+    assert len(lines) == profiles.MAX_LESSONS
+    assert "Ghi chú của Sếp" in text and "Bài học Sếp tự viết đầu tiên" not in text  # dòng cũ nhất bị bỏ
+    assert profiles.append_lessons("qa", ["BÀI HỌC SỐ 24 cần nhớ kỹ!"], "Khác", tmp_path) == []  # trùng
+    assert profiles.append_lessons("qa", ["ngắn"], "x", tmp_path) == []
+
+
+def test_interject_reaches_later_agents_and_reports_missed(tmp_path):
+    import threading
+    agency, db = make_agency(tmp_path)
+    seen = []
+    gate = threading.Event()
+
+    class NoteAgent(FakeAgent):
+        def run(self, instruction, submit):
+            if submit == "submit_plan":
+                gate.wait(5)  # giữ PM ở bước lập kế hoạch tới khi Sếp nhắn xong
+            seen.append((self.role, [n["text"] for n in self.hooks.owner_notes()]))
+            for n in self.hooks.owner_notes():
+                n["delivered"] = True
+            return super().run(instruction, submit)
+
+    agency._agent_factory = lambda role, ctx, hooks: NoteAgent(role, ctx, hooks, {"qa": 1, "review": 1})
+    p = agency.start_project("Làm web")
+    time.sleep(0.1)
+    agency.interject(p["id"], "Thêm Google Map ở trang chủ")
+    gate.set()
+    _wait(agency, p["id"])
+    assert ("designer", ["Thêm Google Map ở trang chủ"]) in seen
+    msgs = [e for e in db.list_events(p["id"]) if e["type"] == "message" and e["data"].get("kind") == "interject"]
+    assert msgs[0]["data"]["text"] == "Thêm Google Map ở trang chủ"
+    # hết vòng thì không nhắn chen ngang được nữa
+    import pytest
+    with pytest.raises(RuntimeError):
+        agency.interject(p["id"], "muộn")
+    # vòng mới: hộp thư trống
+    agency.revise(p["id"], "Sửa thêm")
+    _wait(agency, p["id"])
+    assert seen[-1][1] == []

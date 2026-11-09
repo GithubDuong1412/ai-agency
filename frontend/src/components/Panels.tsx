@@ -1,5 +1,5 @@
 import { fillNames } from '../names'
-import { ArrowLeftRight, ArrowRight, Check, ChevronUp, CircleAlert, PenLine, RefreshCw, RotateCcw, SendHorizontal, Sparkles } from 'lucide-react'
+import { ArrowLeftRight, ArrowRight, Check, MessageSquarePlus, ChevronUp, CircleAlert, PenLine, RefreshCw, RotateCcw, SendHorizontal, Sparkles } from 'lucide-react'
 import { useState } from 'react'
 import { api, timeAgo, type AgencyEvent, type Config, type Overview, type Project, type Report, type Role } from '../api'
 import type { AgentLive } from '../store'
@@ -151,10 +151,13 @@ export function ProjectCommandBar({ project, report, onDone, className = '' }: {
   const revise = () => fb && run(() => api.revise(project.id, fb, imgs), 'Đã gửi yêu cầu, đội đang làm vòng mới.')
   const resume = () => run(() => api.resume(project.id, fb, imgs), 'Đã chạy lại dự án.')
   const approve = () => run(() => api.approve(project.id, fb, imgs), 'Đã duyệt dự án.')
+  // Đội đang làm: nhắn chen ngang, agent đang chạy đọc ở bước kế tiếp (không mở vòng mới)
+  const interject = () => fb && run(() => api.message(project.id, fb, imgs),
+    'Đã nhắn. Agent đang làm sẽ đọc ở bước kế tiếp, các bước sau cũng thấy lời nhắn này.')
   // Ctrl+Enter: hành động chính theo trạng thái
-  const primary = halted ? resume : revise
+  const primary = running ? interject : halted ? resume : revise
 
-  const placeholder = running ? 'Đội đang làm việc… Bấm "Dừng" ở trên nếu muốn đổi hướng.'
+  const placeholder = running ? 'Nhắn thêm cho đội đang làm, ví dụ: "Nút Đặt lịch dùng màu đỏ", "Thêm số hotline ở footer"…'
     : pending ? 'Góp ý cần sửa (bắt buộc khi Yêu cầu sửa; tuỳ chọn khi Duyệt)…'
     : halted ? 'Ghi chú thêm cho lần chạy lại (tuỳ chọn)…'
     : 'Muốn chỉnh sửa gì thêm? Ví dụ: "Đổi màu nút Đặt bàn sang đỏ, thêm Google Map ở trang chủ"'
@@ -164,27 +167,32 @@ export function ProjectCommandBar({ project, report, onDone, className = '' }: {
       <div className="mb-2 flex items-center gap-2 px-1">
         <span className="grid h-6 w-6 shrink-0 place-items-center rounded-md bg-amber-400/15"><PenLine className="h-3.5 w-3.5 text-amber-300" aria-hidden="true" /></span>
         <label htmlFor="project-feedback" className="min-w-0 truncate text-xs font-semibold uppercase tracking-[0.12em] text-slate-300">
-          Góp ý cho dự án “{project.title}”
+          {running ? 'Nhắn đội đang làm' : 'Góp ý cho dự án'} “{project.title}”
         </label>
         <span className="ml-auto shrink-0 text-[11px] text-muted max-md:hidden">
-          {running ? 'Thanh này mở lại khi đội làm xong' : 'Ctrl + Enter để gửi · dán/kéo ảnh vào ô · đội sửa trên code hiện tại'}
+          {running ? 'Ctrl + Enter để nhắn · agent đọc ở bước kế tiếp · đổi hướng hẳn thì bấm Dừng'
+            : 'Ctrl + Enter để gửi · dán/kéo ảnh vào ô · đội sửa trên code hiện tại'}
         </span>
       </div>
-      <AttachThumbs a={att} disabled={busy || running} />
+      <AttachThumbs a={att} disabled={busy} />
       {/* cùng kiểu với thanh giao lệnh: ô nhập nổi khối, các nút cao bằng ô nhập */}
-      <div {...(running ? {} : att.dropProps)}
+      <div {...att.dropProps}
         className={`flex items-stretch gap-2 rounded-xl border bg-ink-950/80 p-1.5 shadow-inner shadow-black/40 transition focus-within:ring-2 ${att.dragging
         ? 'border-teal-300 ring-2 ring-teal-400/30'
         : pending
         ? 'border-amber-300/30 focus-within:border-amber-200/60 focus-within:ring-amber-300/20'
-        : 'border-teal-400/25 focus-within:border-teal-300/60 focus-within:ring-teal-400/20'} ${running ? 'opacity-60' : ''}`}>
-        <textarea id="project-feedback" value={text} onChange={e => setText(e.target.value)} rows={2} disabled={running || busy}
+        : 'border-teal-400/25 focus-within:border-teal-300/60 focus-within:ring-teal-400/20'}`}>
+        <textarea id="project-feedback" value={text} onChange={e => setText(e.target.value)} rows={2} disabled={busy}
           onPaste={att.onPaste}
           onKeyDown={e => { if (e.key === 'Enter' && (e.ctrlKey || e.metaKey)) primary() }}
           placeholder={placeholder}
           className="min-w-0 flex-1 resize-none bg-transparent px-2.5 py-2 text-[15px] leading-relaxed text-slate-100 outline-none placeholder:text-muted disabled:cursor-not-allowed" />
-        {!running && <AttachButton a={att} disabled={busy} />}
-        {!running && (pending ? <>
+        <AttachButton a={att} disabled={busy} />
+        {running ? (
+          <button type="button" onClick={interject} disabled={busy || !fb} className={`${BAR_BTN} bg-sky-400 text-ink-950 hover:bg-sky-300`}>
+            <MessageSquarePlus className="h-4 w-4" aria-hidden="true" /><span className="max-sm:hidden">{busy ? 'Đang gửi…' : 'Nhắn đội'}</span>
+          </button>
+        ) : (pending ? <>
           <button type="button" onClick={approve} disabled={busy} className={`${BAR_BTN} bg-teal-400 text-ink-950 hover:bg-teal-300`}>
             <Check className="h-4 w-4" aria-hidden="true" /><span className="max-sm:hidden">Duyệt</span>
           </button>

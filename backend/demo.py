@@ -44,6 +44,10 @@ class DemoAgent:
         try:
             if images:
                 self._say(f"Đã xem {len(images)} ảnh {{@owner}} đính kèm.")
+            notes = [n for n in getattr(self.hooks, "owner_notes", lambda: [])() if not n.get("delivered")]
+            for n in notes:  # demo: agent vừa tới lượt đọc lời nhắn chen ngang của Sếp
+                n["delivered"] = True
+                self._say(f"Đã nhận lời nhắn của {{@owner}}: “{n['text'][:80]}”, mình làm theo.")
             return AgentResult(getattr(self, submit)(instruction), 1)
         finally:
             self.hooks.emit("agent_status", self.role, status="idle")
@@ -100,6 +104,9 @@ class DemoAgent:
                 "## Kết quả\n- Trang `/home` đã dựng xong.\n- QA phát hiện 1 lỗi, đã sửa.\n- Kiểm duyệt: đạt 8/10.\n\n"
                 "_Đây là chế độ demo, agent là giả lập._",
                 "how_to_check": ["Bấm Xem trước, mở /home"], "known_issues": [], "next_steps": ["Thêm API key để chạy thật"]}
+
+    def submit_lessons(self, _):
+        return {"lessons": [{"role": "frontend", "text": "Kiểm tiêu đề dài ở màn 375px trước khi nộp, tránh tràn chữ."}]}
 
 
 def demo_factory():

@@ -2,6 +2,7 @@
 from __future__ import annotations
 
 import json
+import re
 import shutil
 import threading
 import time
@@ -13,10 +14,11 @@ from . import attachments, versions
 from .agents import profiles
 from .agents import skills as skills_mod
 from .agents.base import Agent, AgentCancelled, AgentError, AgentResult
+from .agents.schemas import LESSON_SCOPES
 from .db import DB
 from .events import EventBus
 from .preview import PreviewManager
-from .settings import SKELETON_DIR, WORKSPACES_DIR, get_config, has_api_key, role_config
+from .settings import AGENTS_DIR, SKELETON_DIR, WORKSPACES_DIR, get_config, has_api_key, role_config
 from .tools.fs_tools import Sandbox
 from .tools.registry import ToolContext
 from .tools.shell_tools import CommandRunner
@@ -53,6 +55,10 @@ class _ProjectHooks:
     def should_stop(self) -> bool:
         return self.stop.is_set()
 
+    def owner_notes(self) -> list[dict]:
+        """Lời nhắn Sếp gửi chen ngang trong vòng này: [{text, images: [Path], delivered}] (thứ tự gửi)."""
+        return list(self.agency._notes.get(self.pid, []))
+
     def over_budget(self) -> bool:
         return self.run_tokens > self.budget
 
@@ -60,8 +66,9 @@ class _ProjectHooks:
 class Agency:
     def __init__(self, db: DB, bus: EventBus, preview: PreviewManager | None = None,
                  agent_factory: AgentFactory | None = None, workspaces_dir: Path = WORKSPACES_DIR,
-                 skeleton_dir: Path = SKELETON_DIR):
+                 skeleton_dir: Path = SKELETON_DIR, agents_dir: Path = AGENTS_DIR):
         self.db, self.bus = db, bus
+        self.agents_dir = agents_dir  # nơi ghi bài học (agents/<vai>/lessons.md)
         cfg = get_config()
         self.preview = preview or PreviewManager(cfg["php_bin"], int(cfg.get("preview_port_start", 8100)))
         self.workspaces_dir = workspaces_dir
@@ -69,6 +76,7 @@ class Agency:
         self._agent_factory = agent_factory
         self._client = None
         self._threads: dict[str, threading.Thread] = {}
+        self._notes: dict[str, list[dict]] = {}  # lời nhắn chen ngang của Sếp trong vòng đang chạy
         self._stops: dict[str, threading.Event] = {}
         self._lock = threading.Lock()
 
@@ -93,6 +101,16 @@ class Agency:
         names = self._attach(pid, images)
         self.bus.publish(pid, "message", "owner", to="pm", text=feedback, kind="feedback", images=names)
         self._spawn(pid, feedback=feedback, images=names)
+
+    def interject(self, pid: str, text: str, images: list[tuple[bytes, str]] | None = None) -> None:
+        """Sếp nhắn chen ngang khi đội đang làm: agent đang chạy đọc ở bước kế tiếp, agent sau đọc khi bắt đầu."""
+        if not self.is_running(pid):
+            raise RuntimeError("Đội không còn làm việc. Hãy dùng Yêu cầu sửa để mở vòng mới.")
+        names = self._attach(pid, images)
+        ws = self.workspace(pid)
+        self._notes.setdefault(pid, []).append({
+            "text": text, "images": [ws / r for r in attachments.rel_paths(names)], "delivered": False})
+        self.bus.publish(pid, "message", "owner", to="all", text=text, kind="interject", images=names)
 
     def approve(self, pid: str, note: str = "", images: list[tuple[bytes, str]] | None = None) -> None:
         for r in self.db.list_reports(pid):
@@ -142,6 +160,7 @@ class Agency:
                 raise RuntimeError("Dự án đang chạy.")
             stop = threading.Event()
             self._stops[pid] = stop
+            self._notes[pid] = []
             t = threading.Thread(target=self._run_safe, args=(pid, feedback, stop, images or []), daemon=True,
                                  name=f"project-{pid}")
             self._threads[pid] = t
@@ -190,7 +209,7 @@ class Agency:
     def _run_safe(self, pid: str, feedback: str | None, stop: threading.Event,
                   images: list[str] | None = None) -> None:
         try:
-            self._run(pid, feedback, stop, images or [])
+            self._run_and_report(pid, feedback, stop, images or [])
         except AgentCancelled:
             self._snapshot(pid, "dừng giữa chừng")
             self.db.update_project(pid, status="stopped")
@@ -201,6 +220,17 @@ class Agency:
             self.db.update_project(pid, status="failed", error=msg)
             self.bus.publish(pid, "project_status", None, status="failed", error=msg,
                              trace=traceback.format_exc()[-2000:])
+
+    def _run_and_report(self, pid: str, feedback: str | None, stop: threading.Event, images: list[str]) -> None:
+        try:
+            self._run(pid, feedback, stop, images)
+        finally:
+            missed = [n for n in self._notes.get(pid, []) if not n["delivered"]]
+            if missed:
+                owner = get_config().get("owner_name", "Sếp")
+                self.bus.publish(pid, "message", None, to="all", kind="note",
+                                 text=f"{len(missed)} lời nhắn của {owner} đến lúc đội đã làm xong nên chưa ai đọc. "
+                                      "Hãy gửi lại bằng Yêu cầu sửa nếu vẫn cần.")
 
     def _snapshot(self, pid: str, note: str) -> None:
         """Lưu phần việc dở dang của vòng hiện tại để không mất khi vòng sau ghi đè."""
@@ -282,6 +312,7 @@ class Agency:
 
         # 4) Kiểm duyệt
         review: dict = {}
+        review_found: list[str] = []  # mọi lỗi Kiểm duyệt nêu trong vòng (cho bước rút bài học)
         review_rounds = int(limits.get("review_rounds", 2))
         for r in range(review_rounds + 1):
             handoff("qa", "reviewer", "Các task đã qua QA, nhờ {@reviewer} kiểm duyệt tổng thể.")
@@ -292,6 +323,7 @@ class Agency:
                 + img_note + "\n" + (SHOT_RULE_REVISE if run_no > 1 else SHOT_RULE_FIRST)
                 + "\nXong gọi submit_review.", "submit_review").data
             self.bus.publish(pid, "review", "reviewer", **review, round=r + 1)
+            review_found += [f"[{i['assignee']}] {i['title']}: {i['detail'][:200]}" for i in review["issues"]]
             if review["verdict"] == "approve" or not review["issues"] or r == review_rounds:
                 break
             by_assignee: dict[str, list[dict]] = {}
@@ -331,9 +363,50 @@ class Agency:
         report["commit"] = versions.safe_commit(ws, f"Vòng {run_no}: {report.get('headline', '')}",
                                                 run_no=run_no, allow_empty=True)
         rep = self.db.create_report(pid, run_no, report)
-        self.db.update_project(pid, status="awaiting_approval")
         self.bus.publish(pid, "report", "pm", report_id=rep["id"], headline=report["headline"])
+        self._learn(pid, agent, p["title"], feedback, log, review_found)
+        self.db.update_project(pid, status="awaiting_approval")
         self.bus.publish(pid, "project_status", None, status="awaiting_approval")
+
+    def _learn(self, pid: str, agent, title: str, feedback: str | None, log: list[dict],
+               review_found: list[str]) -> None:
+        """Trưởng dự án rút 0–3 bài học chung từ lỗi QA/Kiểm duyệt bắt được và góp ý của Sếp, ghi vào
+        agents/<vai>/lessons.md để các dự án sau không lặp lại. Không bao giờ làm hỏng vòng chạy."""
+        if not get_config().get("learn_lessons", True):
+            return
+        qa_found = [x for e in log for x in e.get("qa_found", [])]
+        if not (qa_found or review_found or feedback):
+            return  # vòng trơn tru, không có gì để học
+        owner = get_config().get("owner_name", "Sếp")
+        existing = {sc: profiles.lessons_of(sc if sc != "team" else profiles.TEAM, self.agents_dir)
+                    for sc in LESSON_SCOPES}
+        known = "\n".join(f"[{sc}] {ln}" for sc, lines in existing.items() for ln in lines) or "(chưa có)"
+        instr = (
+            "Vòng làm việc vừa xong. Hãy rút ra tối đa 3 BÀI HỌC để đội không lặp lại lỗi ở các dự án SAU.\n"
+            "Chỉ ghi bài học chung, áp dụng được cho dự án khác (vd. 'Viết test bằng PHPUnit dạng class, không dùng "
+            "Pest'), KHÔNG ghi việc riêng của dự án này (vd. 'nút Đặt bàn phải màu đỏ'). Mỗi bài một câu mệnh lệnh "
+            "ngắn, gắn đúng vai cần nhớ ('team' nếu cả đội). Bỏ qua lỗi vặt, lỗi đã có trong bài học cũ. "
+            "Không có gì đáng học thì nộp danh sách rỗng.\n\n"
+            f"Lỗi QA bắt được:\n" + ("\n".join(f"- {x}" for x in qa_found[:30]) or "(không)") + "\n\n"
+            f"Lỗi Kiểm duyệt nêu:\n" + ("\n".join(f"- {x}" for x in review_found[:30]) or "(không)") + "\n\n"
+            f"Góp ý/yêu cầu sửa của {owner} vòng này:\n" + (feedback or "(không)")[:3000] + "\n\n"
+            f"Bài học đã có (đừng lặp lại):\n{known[:6000]}\n\nKhông cần đọc file. Gọi submit_lessons."
+        )
+        try:
+            items = agent("pm").run(instr, "submit_lessons").data.get("lessons", [])[:3]
+            added = []
+            for it in items:
+                scope = profiles.TEAM if it.get("role") == "team" else it.get("role")
+                added += [(it.get("role"), ln) for ln in
+                          profiles.append_lessons(scope, [it.get("text", "")], title, self.agents_dir)]
+            if added:
+                self.bus.publish(pid, "message", "pm", to="all", kind="lessons",
+                                 text="\n".join(f"• [{r}] {re.sub(r' _[(].*[)]_$', '', ln.removeprefix('- '))}"
+                                                for r, ln in added))
+        except AgentCancelled:
+            raise
+        except Exception as e:  # noqa: BLE001
+            self.bus.publish(pid, "message", None, to="all", kind="note", text=f"Không rút được bài học: {e}"[:300])
 
     def _dev_qa(self, pid: str, task: dict, agent, handoff, qa_rounds: int, img_note: str = "") -> dict:
         dev_role = task["assignee"]
@@ -366,6 +439,8 @@ class Agency:
                 return entry
             feedback = qa["issues"] or [{"title": "QA chưa đạt", "detail": qa["summary"], "severity": "medium",
                                          "assignee": dev_role}]
+            entry.setdefault("qa_found", []).extend(
+                f"[{i.get('assignee', dev_role)}] {i['title']}: {i['detail'][:200]}" for i in feedback)
             handoff("qa", dev_role, f"Chưa đạt: {len(feedback)} lỗi cần sửa.")
         self.db.update_task(task["id"], status="needs_attention")
         self.bus.publish(pid, "task_update", "qa", task={**task, "status": "needs_attention"})

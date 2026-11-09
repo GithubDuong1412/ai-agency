@@ -31,6 +31,10 @@ if DEMO:
 
     agency._agent_factory = lambda role, ctx, hooks: _demo_make(role, ctx, hooks)
     _demo_make = demo_factory()
+    # bài học giả lập của demo ghi riêng, không lẫn vào agents/ thật
+    agency.agents_dir = DATA_DIR / "demo-agents"
+    for _scope in ("_team", "pm", "designer", "frontend", "backend", "qa", "reviewer"):
+        (agency.agents_dir / _scope).mkdir(parents=True, exist_ok=True)
 
 
 @asynccontextmanager
@@ -142,6 +146,19 @@ def revise_project(pid: str, body: FeedbackIn):
         raise HTTPException(400, "Hãy ghi góp ý cần sửa")
     try:
         agency.revise(pid, body.feedback.strip(), _images(body.images))
+    except RuntimeError as e:
+        raise HTTPException(409, str(e))
+    return {"ok": True}
+
+
+@app.post("/api/projects/{pid}/message")
+def message_team(pid: str, body: FeedbackIn):
+    """Sếp nhắn chen ngang khi đội đang làm (không mở vòng mới)."""
+    _project_or_404(pid)
+    if not body.feedback.strip():
+        raise HTTPException(400, "Hãy ghi lời nhắn")
+    try:
+        agency.interject(pid, body.feedback.strip(), _images(body.images))
     except RuntimeError as e:
         raise HTTPException(409, str(e))
     return {"ok": True}
@@ -388,9 +405,24 @@ def preview_prompt(role: str):
 
 
 # ---------- events (SSE) ----------
+def _type_list(s: str | None) -> list[str] | None:
+    items = [t.strip() for t in (s or "").split(",") if t.strip()]
+    return items or None
+
+
 @app.get("/api/events/history")
-def events_history(project_id: str | None = None, after: int = 0, limit: int = Query(300, le=2000)):
-    return db.list_events(project_id, after, limit)
+def events_history(project_id: str | None = None, after: int = 0, limit: int = Query(300, le=2000),
+                   exclude: str | None = None):
+    """Sự kiện sau `after` (mới nhất `limit` dòng nếu không lọc dự án). exclude = 'usage,file_changed'."""
+    return db.list_events(project_id, after, limit, exclude=_type_list(exclude))
+
+
+@app.get("/api/projects/{pid}/history")
+def project_history(pid: str, before: int = 0, limit: int = Query(300, ge=1, le=1000), types: str | None = None):
+    """Lịch sử hội thoại của một dự án theo trang, lùi về trước (before=0: trang mới nhất)."""
+    _project_or_404(pid)
+    events, has_more = db.page_events(pid, before, limit, _type_list(types))
+    return {"events": events, "has_more": has_more}
 
 
 @app.get("/api/events")

@@ -6,6 +6,7 @@ import { api, screenshotUrl, type AgencyEvent, type Role } from '../api'
 import type { ProjectData } from '../useProjectData'
 import { Button, Empty, StatusPill } from './common'
 import { useLightbox } from './Lightbox'
+import { useProjectHistory } from '../useProjectHistory'
 import { TaskBoard } from './TaskBoard'
 import { Timeline } from './Timeline'
 import { Versions } from './Versions'
@@ -23,6 +24,7 @@ export function ProjectDetail({ id, data, reload, roles, events, onBack }: {
   const [frameKey, setFrameKey] = useState(0)
   const [reloading, setReloading] = useState(false)
   const box = useLightbox()
+  const history = useProjectHistory(id, events)  // hội thoại riêng của dự án, tải dần khi cuộn lên
   const pEvents = events.filter(e => e.project_id === id)
   const lastEventId = pEvents.length ? pEvents[pEvents.length - 1].id : 0
 
@@ -98,7 +100,12 @@ export function ProjectDetail({ id, data, reload, roles, events, onBack }: {
 
       {msg && <div className="rounded-lg bg-white/5 px-3 py-2 text-xs text-slate-300">{msg}</div>}
 
-      {tab === 'chat' && <div className="panel p-4"><Timeline events={pEvents} roles={roles} showTools /></div>}
+      {tab === 'chat' && (
+        <div className="panel p-4">
+          <Timeline key={id} events={history.events} roles={roles} showTools limit={Infinity}
+            older={{ hasMore: history.hasMore, loading: history.loadingOlder, loaded: history.loaded, load: history.loadOlder }} />
+        </div>
+      )}
       {tab === 'tasks' && <div className="panel p-4"><TaskBoard tasks={tasks} roles={roles} projects={[project]} onOpenProject={() => {}} /></div>}
 
       {tab === 'report' && (report ? (

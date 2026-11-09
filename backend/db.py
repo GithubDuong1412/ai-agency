@@ -174,17 +174,40 @@ class DB:
         return {"id": cur.lastrowid, "project_id": pid, "type": type_, "agent": agent,
                 "data": data, "created_at": now}
 
-    def list_events(self, pid: str | None = None, after: int = 0, limit: int = 500) -> list[dict]:
+    def list_events(self, pid: str | None = None, after: int = 0, limit: int = 500,
+                    exclude: list[str] | None = None) -> list[dict]:
+        ex_sql, ex_args = "", []
+        if exclude:
+            ex_sql = f" AND type NOT IN ({','.join('?' * len(exclude))})"
+            ex_args = list(exclude)
         if pid:
-            rows = self._all(
-                "SELECT * FROM events WHERE project_id=? AND id>? ORDER BY id LIMIT ?", (pid, after, limit))
+            rows = self._all(f"SELECT * FROM events WHERE project_id=? AND id>?{ex_sql} ORDER BY id LIMIT ?",
+                             (pid, after, *ex_args, limit))
         else:
             rows = self._all(
-                "SELECT * FROM (SELECT * FROM events WHERE id>? ORDER BY id DESC LIMIT ?) ORDER BY id",
-                (after, limit))
+                f"SELECT * FROM (SELECT * FROM events WHERE id>?{ex_sql} ORDER BY id DESC LIMIT ?) ORDER BY id",
+                (after, *ex_args, limit))
         for r in rows:
             r["data"] = json.loads(r["data"])
         return rows
+
+    def page_events(self, pid: str, before: int = 0, limit: int = 300,
+                    types: list[str] | None = None) -> tuple[list[dict], bool]:
+        """Trang lịch sử lùi về trước của một dự án: `limit` sự kiện mới nhất có id < before (before=0: mới nhất),
+        thứ tự tăng dần. Trả (events, còn sự kiện cũ hơn không)."""
+        where, args = "project_id=?", [pid]
+        if before > 0:
+            where += " AND id<?"
+            args.append(before)
+        if types:
+            where += f" AND type IN ({','.join('?' * len(types))})"
+            args += types
+        rows = self._all(f"SELECT * FROM events WHERE {where} ORDER BY id DESC LIMIT ?", (*args, limit + 1))
+        has_more = len(rows) > limit
+        rows = rows[:limit][::-1]
+        for r in rows:
+            r["data"] = json.loads(r["data"])
+        return rows, has_more
 
     # ---------- reports ----------
     def create_report(self, pid: str, run_no: int, content: dict) -> dict:

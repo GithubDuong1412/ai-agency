@@ -8,10 +8,12 @@ import { RoleSkills, SkillLibrary } from './Skills'
 const TEAM = '_team'
 const SKILLS = '__skills'
 const fileLabel = (f: ProfileFile) =>
-  f.path === 'rules.md' ? 'Luật' : f.path === 'checklist.md' ? 'Checklist tự kiểm' : f.title
+  f.path === 'rules.md' ? 'Luật' : f.path === 'checklist.md' ? 'Checklist tự kiểm'
+    : f.path === 'lessons.md' ? `Bài học${f.count ? ` · ${f.count}` : ''}` : f.title
 const fileHint = (path: string) =>
   path === 'rules.md' ? 'Luôn nạp vào prompt · nên dưới ~30 dòng'
     : path === 'checklist.md' ? 'Luôn nạp vào prompt · agent tự kiểm trước khi nộp'
+      : path === 'lessons.md' ? 'Trưởng dự án tự ghi sau mỗi vòng có lỗi/góp ý · luôn nạp vào prompt · tối đa 20 dòng, sửa/xoá thoải mái'
       : 'Agent tự đọc khi cần (tool read_knowledge) · dòng đầu là tiêu đề'
 
 /** Hồ sơ chuyên môn: xem/sửa luật, checklist, kiến thức của từng agent (file trong agents/). */

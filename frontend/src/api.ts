@@ -57,6 +57,9 @@ export const api = {
     req(`/api/projects/${id}/approve`, { method: 'POST', body: JSON.stringify({ feedback, images }) }),
   revise: (id: string, feedback: string, images: string[] = []) =>
     req(`/api/projects/${id}/revise`, { method: 'POST', body: JSON.stringify({ feedback, images }) }),
+  // Nhắn chen ngang khi đội đang làm (không mở vòng mới)
+  message: (id: string, feedback: string, images: string[] = []) =>
+    req(`/api/projects/${id}/message`, { method: 'POST', body: JSON.stringify({ feedback, images }) }),
   resume: (id: string, feedback = '', images: string[] = []) =>
     req(`/api/projects/${id}/resume`, { method: 'POST', body: JSON.stringify({ feedback, images }) }),
   preview: (id: string) => req<{ url: string }>(`/api/projects/${id}/preview`, { method: 'POST' }),
@@ -67,8 +70,13 @@ export const api = {
   files: (id: string) => req<{ files: { path: string; size: number }[] }>(`/api/projects/${id}/files`),
   file: (id: string, path: string) =>
     req<{ content: string }>(`/api/projects/${id}/file?path=${encodeURIComponent(path)}`),
-  history: (after = 0, projectId?: string) =>
-    req<AgencyEvent[]>(`/api/events/history?after=${after}&limit=400${projectId ? `&project_id=${projectId}` : ''}`),
+  // Nạp đầu cho dashboard: bỏ loại không hiển thị lại từ lịch sử để 400 dòng chứa nhiều tin có ích hơn
+  history: (after = 0, projectId?: string, exclude = 'usage,file_changed') =>
+    req<AgencyEvent[]>(`/api/events/history?after=${after}&limit=400${projectId ? `&project_id=${projectId}` : ''}${exclude ? `&exclude=${exclude}` : ''}`),
+  // Lịch sử hội thoại một dự án theo trang, lùi về trước (before=0: trang mới nhất)
+  projectHistory: (id: string, before = 0, types: string[] = [], limit = 300) =>
+    req<{ events: AgencyEvent[]; has_more: boolean }>(
+      `/api/projects/${id}/history?before=${before}&limit=${limit}${types.length ? `&types=${types.join(',')}` : ''}`),
 }
 
 export type Version = {
@@ -80,7 +88,7 @@ export type VersionFile = {
   binary: boolean; patch: string | null; truncated?: boolean
 }
 
-export type ProfileFile = { path: string; exists: boolean; size: number; title: string }
+export type ProfileFile = { path: string; exists: boolean; size: number; title: string; count?: number | null }
 export type ProfileScope = {
   key: string; name: string; title: string; color: string; files: ProfileFile[]; skills?: string[]
 }

@@ -6,6 +6,7 @@ nhờ strict: true, orchestrator luôn nhận được dữ liệu đúng cấu 
 from __future__ import annotations
 
 ASSIGNEES = ["frontend", "backend"]
+LESSON_SCOPES = ["team", "pm", "designer", "frontend", "backend", "qa", "reviewer"]
 
 
 def _obj(props: dict, required: list[str] | None = None) -> dict:
@@ -71,6 +72,16 @@ SUBMIT_TOOLS: dict[str, dict] = {
             "summary": _STR,
             "strengths": _STR_LIST,
             "issues": {"type": "array", "items": _ISSUE},
+        }),
+    },
+    "submit_lessons": {
+        "description": "Nộp 0–3 bài học rút ra sau vòng làm việc (để trống nếu không có gì đáng nhớ).",
+        "input_schema": _obj({
+            "lessons": {"type": "array", "items": _obj({
+                "role": {"type": "string", "enum": LESSON_SCOPES,
+                         "description": "Vai cần nhớ bài học này; 'team' nếu cả đội."},
+                "text": {"type": "string", "description": "Một câu mệnh lệnh ngắn, áp dụng được cho dự án khác."},
+            })},
         }),
     },
     "submit_report": {

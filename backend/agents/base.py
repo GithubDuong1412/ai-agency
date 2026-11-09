@@ -29,6 +29,14 @@ def first_content(instruction: str, images: list[Path] | None = None) -> str | l
     return blocks + [{"type": "text", "text": instruction}] if blocks else instruction
 
 
+def _notes_block(notes: list[dict], mid_run: bool) -> str:
+    head = ("[Tin nhắn mới từ Sếp, gửi trong lúc bạn đang làm. Đọc kỹ, điều chỉnh việc đang làm cho đúng; "
+            "nếu không liên quan tới phần việc của bạn thì bỏ qua.]" if mid_run else
+            "Lời nhắn Sếp gửi thêm trong vòng này (ưu tiên làm theo nếu liên quan tới việc của bạn):")
+    return head + "\n" + "\n".join(f"- {n['text']}" + (f" (kèm {len(n['images'])} ảnh)" if n["images"] else "")
+                                      for n in notes)
+
+
 def build_system(role: str) -> str:
     """System prompt đầy đủ của một vai trò: phần cố định + hồ sơ chuyên môn (agents/<role>)."""
     rcfg = role_config(role)
@@ -144,6 +152,17 @@ class Agent:
         submit_schema = SUBMIT_TOOLS[submit]["input_schema"]
         system = self._system()
         tools = self._tools(submit)
+        # Lời nhắn chen ngang của Sếp: đọc hết khi bắt đầu, sau đó nhận thêm sau mỗi lượt gọi tool
+        owner_notes = getattr(self.hooks, "owner_notes", None)
+        seen = 0
+        if owner_notes:
+            notes = owner_notes()
+            if notes:
+                instruction += "\n\n" + _notes_block(notes, mid_run=False)
+                images = list(images or []) + [im for n in notes for im in n["images"]]
+                for n in notes:
+                    n["delivered"] = True
+            seen = len(notes)
         messages: list[dict] = [{"role": "user", "content": first_content(instruction, images)}]
         max_iter = int(self.cfg["limits"].get("max_tool_iterations", 40))
         nudges = 0
@@ -210,6 +229,20 @@ class Agent:
                 if submitted is not None:
                     emit("agent_status", status="idle")
                     return AgentResult(data=submitted, iterations=i)
+                if owner_notes:
+                    new = owner_notes()[seen:]
+                    if new:
+                        seen += len(new)
+                        results.append({"type": "text", "text": _notes_block(new, mid_run=True)})
+                        for n in new:
+                            for im in n["images"]:
+                                try:
+                                    results.append(image_block(im))
+                                except (OSError, ValueError):
+                                    pass
+                            n["delivered"] = True
+                        emit("message", text=f"Đã nhận {len(new)} lời nhắn mới của {{@owner}}, đang điều chỉnh.",
+                             to="all", kind="note")
                 messages.append({"role": "user", "content": results})
             raise AgentError(f"Vượt quá {max_iter} lượt làm việc mà chưa xong.")
         except BaseException:
