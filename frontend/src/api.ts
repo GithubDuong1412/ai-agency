@@ -1,5 +1,34 @@
 export type Role = {
   key: string; name: string; title: string; department: string; color: string; model: string; effort: string
+  /** nhân sự tuyển thêm (có thể sửa / cho nghỉ) */
+  hired?: boolean; permissions?: string[]; working_style?: string; hired_at?: string; assignable?: boolean
+}
+/** Ứng viên trong đề xuất tuyển dụng (Sếp sửa được trước khi duyệt) */
+export type Candidate = {
+  key: string; name: string; title: string; department: string; color: string; model: string; effort: string
+  permissions: string[]; working_style: string; rules_markdown: string; checklist_markdown: string; reason: string
+  /** PM nghiên cứu trên web: nguồn đã đọc, tài liệu chắt lọc, skill tự soạn / có sẵn / tải từ GitHub */
+  sources?: { title: string; url: string; note: string }[]
+  /** file agent mẫu (thư viện agency-agents) PM dùng làm gốc cho rules / checklist */
+  reference_agents?: string[]
+  reference_meta?: { path: string; name: string; url: string }[]
+  knowledge?: { slug: string; title: string; content_markdown: string }[]
+  skill?: { name: string; description: string; content_markdown: string }
+  existing_skills?: string[]
+  staged_skills?: StagedSkill[]
+  /** Sếp chọn: skill trong khu chờ sẽ cài cho người này */
+  install_skills?: string[]
+}
+/** Skill trong khu chờ của đề xuất (PM tự soạn hoặc tải từ GitHub), chỉ cài khi Sếp duyệt */
+export type StagedSkill = {
+  name: string; kind: 'authored' | 'github'; url?: string; description: string; reason?: string
+  files: number; size: number; scripts: string[]; ok: boolean; error: string | null
+}
+export type HiringRequest = {
+  id: string; request: string; source_project: string | null
+  status: 'drafting' | 'pending' | 'approved' | 'rejected' | 'failed'
+  proposal: { summary: string; candidates: Candidate[] } | null; feedback: string | null; error: string | null
+  hired: string[] | null; cost_usd: number; created_at: number; updated_at: number
 }
 export type Project = {
   id: string; title: string; prompt: string; status: string; spec: string | null; run_count: number
@@ -27,9 +56,10 @@ export type AgencyEvent = {
 export type Config = {
   agency_name: string; owner_name: string; agency_tagline?: string | null; owner_display?: string | null; roles: Role[]; has_api_key: boolean; demo?: boolean
   limits: Record<string, number>
+  permission_groups?: { key: string; label: string }[]; models?: string[]; efforts?: string[]
 }
 export type Overview = {
-  stats: { staff: number; running_projects: number; open_tasks: number; pending_reviews: number; cost_usd: number }
+  stats: { staff: number; running_projects: number; open_tasks: number; pending_reviews: number; cost_usd: number; pending_hiring?: number }
   projects: Project[]; tasks: Task[]; pending_reports: Report[]
 }
 
@@ -116,7 +146,24 @@ export const profilesApi = {
   prompt: (role: string) => req<{ prompt: string; chars: number }>(`/api/profiles/${role}/prompt`),
 }
 
-export const screenshotUrl = (pid: string, name: string) => `/api/projects/${pid}/screenshots/${name}`
+export const hiringApi = {
+  list: () => req<{ requests: HiringRequest[] }>('/api/hiring'),
+  request: (request: string) => req<HiringRequest>('/api/hiring', { method: 'POST', body: JSON.stringify({ request }) }),
+  approve: (id: string, candidates: Candidate[]) =>
+    req<{ hired: Role[] }>(`/api/hiring/${id}/approve`, { method: 'POST', body: JSON.stringify({ candidates }) }),
+  reject: (id: string) => req<HiringRequest>(`/api/hiring/${id}/reject`, { method: 'POST' }),
+  skillFile: (id: string, name: string, path = 'SKILL.md') =>
+    req<{ content: string }>(`/api/hiring/${id}/skills/${encodeURIComponent(name)}/file?path=${encodeURIComponent(path)}`),
+  revise: (id: string, feedback: string) =>
+    req<HiringRequest>(`/api/hiring/${id}/revise`, { method: 'POST', body: JSON.stringify({ feedback }) }),
+}
+export const rolesApi = {
+  update: (key: string, fields: Partial<Role>) =>
+    req<Role>(`/api/roles/${key}`, { method: 'PUT', body: JSON.stringify(fields) }),
+  remove: (key: string) => req(`/api/roles/${key}`, { method: 'DELETE' }),
+}
+
+export const screenshotUrl =(pid: string, name: string) => `/api/projects/${pid}/screenshots/${name}`
 export const attachmentUrl = (pid: string, name: string) => `/api/projects/${pid}/attachments/${name}`
 
 export const STATUS_LABEL: Record<string, string> = {

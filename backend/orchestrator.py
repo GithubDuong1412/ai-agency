@@ -14,7 +14,7 @@ from . import attachments, versions
 from .agents import profiles
 from .agents import skills as skills_mod
 from .agents.base import Agent, AgentCancelled, AgentError, AgentResult
-from .agents.schemas import LESSON_SCOPES
+from .agents.schemas import lesson_scopes
 from .db import DB
 from .events import EventBus
 from .preview import PreviewManager
@@ -24,6 +24,23 @@ from .tools.registry import ToolContext
 from .tools.shell_tools import CommandRunner
 
 AgentFactory = Callable[[str, ToolContext, Any], Any]
+
+
+def usage_cost(model: str, usage: Any) -> tuple[int, int, float]:
+    """(token vào gồm cache, token ra, chi phí USD) của một lượt gọi model."""
+    pricing = get_config().get("pricing", {})
+    price = pricing.get(model) or pricing.get(get_config().get("default_model")) or {"input": 4, "output": 20}
+    inp = int(getattr(usage, "input_tokens", 0) or 0)
+    cw = int(getattr(usage, "cache_creation_input_tokens", 0) or 0)
+    cr = int(getattr(usage, "cache_read_input_tokens", 0) or 0)
+    out = int(getattr(usage, "output_tokens", 0) or 0)
+    cost = ((inp + cw * 1.25 + cr * 0.1) * price["input"] + out * price["output"]) / 1_000_000
+    # web search (server tool) tính theo lượt: mặc định $10 / 1.000 lượt
+    stu = getattr(usage, "server_tool_use", None)
+    searches = int(getattr(stu, "web_search_requests", 0) or 0) if stu is not None else 0
+    if searches:
+        cost += searches * float(pricing.get("web_search_per_1k", 10)) / 1000
+    return inp + cw + cr, out, cost
 
 
 class _ProjectHooks:
@@ -38,14 +55,7 @@ class _ProjectHooks:
         self.agency.bus.publish(self.pid, type_, agent, **data)
 
     def add_usage(self, model: str, usage: Any) -> None:
-        pricing = get_config().get("pricing", {})
-        price = pricing.get(model) or pricing.get(get_config().get("default_model")) or {"input": 4, "output": 20}
-        inp = int(getattr(usage, "input_tokens", 0) or 0)
-        cw = int(getattr(usage, "cache_creation_input_tokens", 0) or 0)
-        cr = int(getattr(usage, "cache_read_input_tokens", 0) or 0)
-        out = int(getattr(usage, "output_tokens", 0) or 0)
-        cost = ((inp + cw * 1.25 + cr * 0.1) * price["input"] + out * price["output"]) / 1_000_000
-        total_in = inp + cw + cr
+        total_in, out, cost = usage_cost(model, usage)
         self.run_tokens += total_in + out
         self.agency.db.add_usage(self.pid, total_in, out, cost)
         p = self.agency.db.get_project(self.pid)
@@ -79,6 +89,8 @@ class Agency:
         self._notes: dict[str, list[dict]] = {}  # lời nhắn chen ngang của Sếp trong vòng đang chạy
         self._stops: dict[str, threading.Event] = {}
         self._lock = threading.Lock()
+        from .hiring import HiringManager
+        self.hiring = HiringManager(self)
 
     # ---------- public API ----------
     def is_running(self, pid: str) -> bool:
@@ -291,6 +303,15 @@ class Agency:
         self.db.update_project(pid, title=plan["project_title"][:80], spec=spec_md)
         self.bus.publish(pid, "plan", "pm", title=plan["project_title"], summary=plan["summary"],
                          tasks=[t["title"] for t in plan["tasks"]])
+        # PM thấy thiếu chuyên môn: gửi đề xuất tuyển sang mục Tuyển dụng (Sếp duyệt), dự án vẫn chạy tiếp
+        for sug in (plan.get("hiring_suggestions") or [])[:2]:
+            need = str(sug.get("need", "")).strip()
+            if need:
+                try:
+                    self.hiring.request(f"{need}\nLý do (từ dự án “{plan['project_title']}”): {sug.get('reason', '')}",
+                                        source_project=pid)
+                except Exception:  # noqa: BLE001 — đề xuất tuyển không được làm hỏng dự án
+                    pass
 
         # 2) Designer
         handoff("pm", "designer", "Spec đã có trong SPEC.md, nhờ {@designer} lên thiết kế.")
@@ -379,7 +400,7 @@ class Agency:
             return  # vòng trơn tru, không có gì để học
         owner = get_config().get("owner_name", "Sếp")
         existing = {sc: profiles.lessons_of(sc if sc != "team" else profiles.TEAM, self.agents_dir)
-                    for sc in LESSON_SCOPES}
+                    for sc in lesson_scopes()}
         known = "\n".join(f"[{sc}] {ln}" for sc, lines in existing.items() for ln in lines) or "(chưa có)"
         instr = (
             "Vòng làm việc vừa xong. Hãy rút ra tối đa 3 BÀI HỌC để đội không lặp lại lỗi ở các dự án SAU.\n"
@@ -476,10 +497,17 @@ def run_screenshots(shot_dir: Path, since_ms: int, limit: int = 8) -> list[str]:
 
 
 def roster() -> list[dict]:
-    from .agents.roles import ROLES
+    from .agents import hired as hired_mod
+    from .agents.roles import all_roles
+    hired = hired_mod.load()
     out = []
-    for key in ROLES:
+    for key in all_roles():
         r = role_config(key)
-        out.append({"key": key, "name": r["name"], "title": r["title"], "department": r["department"],
-                    "color": r["color"], "model": r["model"], "effort": r["effort"]})
+        item = {"key": key, "name": r["name"], "title": r["title"], "department": r["department"],
+                "color": r["color"], "model": r["model"], "effort": r["effort"], "hired": key in hired}
+        if key in hired:
+            h = hired[key]
+            item.update(permissions=h.get("permissions", []), working_style=h.get("working_style", ""),
+                        hired_at=h.get("hired_at"), assignable=hired_mod.can_take_tasks(h))
+        out.append(item)
     return out

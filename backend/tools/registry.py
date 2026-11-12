@@ -127,6 +127,20 @@ TOOL_SCHEMAS: dict[str, dict] = {
             "required": ["topic"],
         },
     },
+    "read_reference": {
+        "description": (
+            "Đọc một file agent mẫu trong thư viện agency-agents (đường dẫn lấy từ danh mục trong lời giao việc). "
+            "File dài: đọc tiếp bằng offset."
+        ),
+        "input_schema": {
+            "type": "object",
+            "properties": {
+                "path": {"type": "string", "description": "Vd. 'marketing/marketing-seo-specialist.md'"},
+                "offset": {"type": "integer", "description": "Vị trí ký tự bắt đầu đọc, mặc định 0"},
+            },
+            "required": ["path"],
+        },
+    },
     "use_skill": {
         "description": (
             "Đọc hướng dẫn của một skill bạn được giao (mặc định SKILL.md). Có thể đọc file kèm theo trong skill "
@@ -165,7 +179,8 @@ TOOL_SCHEMAS: dict[str, dict] = {
         "input_schema": {
             "type": "object",
             "properties": {
-                "to": {"type": "string", "description": "Mã vai trò người nhận: pm, designer, frontend, backend, qa, reviewer, all"},
+                "to": {"type": "string", "description": "Mã vai trò người nhận (xem danh sách đội: pm, designer, "
+                                                        "frontend, backend, qa, reviewer, người tuyển thêm…) hoặc all"},
                 "text": {"type": "string"},
             },
             "required": ["to", "text"],
@@ -191,6 +206,8 @@ class ToolContext:
     # skill được giao: đọc hướng dẫn (skill, file, offset) và chạy script (skill, script, args)
     use_skill: Callable[[str, str | None, int], str] | None = None
     run_skill_script: Callable[[str, str, list], tuple[int, str]] | None = None
+    # thư viện agent mẫu (chỉ luồng tuyển dụng): (path, offset) -> nội dung; ném ValueError nếu không có
+    read_reference: Callable[[str, int], str] | None = None
 
 
 def _validate(name: str, schema: dict, inp: Any) -> str | None:
@@ -276,6 +293,13 @@ def execute_tool(name: str, inp: dict, ctx: ToolContext) -> tuple[list[dict] | s
                 return "Hồ sơ kiến thức chưa được cấu hình.", True, "không có hồ sơ"
             try:
                 return ctx.read_knowledge(inp["topic"]), False, inp["topic"]
+            except ValueError as e:
+                return str(e), True, str(e)
+        if name == "read_reference":
+            if ctx.read_reference is None:
+                return "Thư viện mẫu chưa sẵn sàng.", True, "không có thư viện"
+            try:
+                return ctx.read_reference(inp["path"], inp.get("offset", 0)), False, inp["path"]
             except ValueError as e:
                 return str(e), True, str(e)
         if name == "use_skill":
