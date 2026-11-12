@@ -22,6 +22,18 @@ pricing:
   claude-opus-5-5:   {input: 4.0, output: 20.0}
   claude-sonnet-5-5: {input: 2.0, output: 10.0}
   claude-haiku-5-5:  {input: 0.1, output: 0.5}
+  web_search_per_1k: 10       # $ cho 1.000 lượt web search (PM nghiên cứu khi tuyển dụng)
+
+# Tuyển dụng: PM chắt lọc rules, checklist, kiến thức, skill cho người mới từ thư viện agent mẫu
+# (agency-agents), tìm thêm trên web chỉ để bổ sung
+hiring:
+  reference_repo: https://github.com/msitarzewski/agency-agents   # để rỗng: chỉ nghiên cứu web
+  reference_ref: main
+  reference_refresh_days: 7   # tải lại thư viện mẫu sau số ngày này
+  web_search_uses: 3          # số lượt tìm kiếm tối đa mỗi lần soạn đề xuất (bổ sung)
+  web_fetch_uses: 5           # số trang web đọc tối đa mỗi lần soạn đề xuất (bổ sung)
+  max_skill_downloads: 3      # số skill GitHub tối đa PM được đề xuất tải về (chỉ cài khi Sếp duyệt)
+  token_budget: 1500000       # tổng token tối đa cho một lần soạn đề xuất
 
 # Công cụ chạy lệnh trong workspace (dùng PHP/Composer của Laragon)
 php_bin: "C:/laragon/bin/php/php-8.5.12-Win32-vs17-x64/php.exe"

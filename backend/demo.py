@@ -24,6 +24,74 @@ HOME = """@extends('layouts.app')
 """
 
 
+DEMO_SEO_CANDIDATE = {
+    "key": "seo_writer", "name": "Linh", "title": "Content SEO Writer", "department": "Nội dung",
+    "color": "#e879f9", "model": "claude-sonnet-5-5", "effort": "medium", "permissions": ["write", "message"],
+    "working_style": "Bạn là Content SEO Writer. Bạn viết nội dung trang (tiêu đề, mô tả, đoạn giới thiệu, bài viết) "
+                     "chuẩn SEO theo SPEC.md, ghi thẳng vào view Blade mà Frontend đã dựng. Trước khi viết, đọc "
+                     "knowledge seo-on-page; viết xong tự kiểm theo checklist rồi nộp cho QA.",
+    "rules_markdown": (
+        "## Tiêu đề và mô tả\n"
+        "- Mỗi trang có `<title>` riêng, 50–60 ký tự, từ khoá chính ở đầu. Lý do: Google cắt tiêu đề dài trên kết quả tìm kiếm.\n"
+        "- Meta description 120–160 ký tự, có lời kêu gọi hành động. Lý do: tăng tỉ lệ bấm, tránh bị cắt.\n"
+        "- Không trùng title/description giữa các trang.\n"
+        "## Cấu trúc nội dung\n"
+        "- Mỗi trang đúng 1 thẻ `h1`, chứa từ khoá chính; `h2`/`h3` theo thứ bậc, không nhảy cấp.\n"
+        "- Đoạn văn ≤ 4 câu, câu ≤ 25 từ; dùng danh sách khi liệt kê từ 3 ý.\n"
+        "- Từ khoá chính xuất hiện trong 100 từ đầu, mật độ tự nhiên (không lặp quá 3 lần mỗi 300 từ).\n"
+        "## Ảnh và liên kết\n"
+        "- Mọi `<img>` có `alt` mô tả nội dung ảnh (không nhồi từ khoá); ảnh trang trí dùng `alt=\"\"`.\n"
+        "- Anchor text mô tả đích đến, không dùng \"bấm vào đây\".\n"
+        "## Dữ liệu có cấu trúc\n"
+        "- Trang doanh nghiệp địa phương có JSON-LD `LocalBusiness` (tên, địa chỉ, giờ mở cửa, điện thoại) khớp nội dung trang.\n"
+        "## Giọng văn\n"
+        "- Tiếng Việt tự nhiên, có dấu đầy đủ, xưng hô thống nhất theo SPEC; không sao chép nội dung từ web khác."),
+    "checklist_markdown": (
+        "## Trước khi viết\n- [ ] Đã đọc SPEC.md và xác định từ khoá chính cho từng trang\n"
+        "- [ ] Đã xem bố cục Blade của Frontend để biết vị trí từng đoạn\n"
+        "## Tiêu đề và mô tả\n- [ ] Title 50–60 ký tự, không trùng giữa các trang\n"
+        "- [ ] Meta description 120–160 ký tự, có lời kêu gọi hành động\n"
+        "## Nội dung\n- [ ] Đúng 1 thẻ h1, các h2/h3 đúng thứ bậc\n- [ ] Từ khoá chính trong 100 từ đầu\n"
+        "- [ ] Không còn chữ giữ chỗ (lorem ipsum, TODO)\n- [ ] Chính tả tiếng Việt, dấu câu đúng\n"
+        "## Ảnh, liên kết, dữ liệu có cấu trúc\n- [ ] Ảnh có alt phù hợp\n- [ ] Anchor text mô tả đích đến\n"
+        "- [ ] JSON-LD hợp lệ và khớp nội dung trang\n"
+        "## Bàn giao\n- [ ] Ghi danh sách file đã sửa và từ khoá từng trang vào notes_for_qa"),
+    "reason": "Đội chưa có ai phụ trách nội dung và SEO.",
+    "reference_agents": ["marketing/marketing-seo-specialist.md", "marketing/marketing-content-creator.md"],
+    "sources": [
+        {"title": "Google Search Central: SEO Starter Guide",
+         "url": "https://developers.google.com/search/docs/fundamentals/seo-starter-guide",
+         "note": "Nền tảng: tiêu đề, mô tả, cấu trúc nội dung, ảnh."},
+        {"title": "Google: Influencing your title links",
+         "url": "https://developers.google.com/search/docs/appearance/title-link", "note": "Quy tắc viết title."},
+        {"title": "schema.org LocalBusiness", "url": "https://schema.org/LocalBusiness",
+         "note": "Dữ liệu có cấu trúc cho tiệm, quán, doanh nghiệp địa phương."},
+    ],
+    "knowledge": [
+        {"slug": "seo-on-page", "title": "SEO on-page cho website Laravel",
+         "content_markdown": "# SEO on-page cho website Laravel\n\n## Title và meta trong Blade\n"
+                             "Đặt trong layout: `<title>@yield('title')</title>` và "
+                             "`<meta name=\"description\" content=\"@yield('description')\">`; mỗi view khai báo "
+                             "`@section('title', '…')`.\n\n## Ngưỡng nên nhớ\n- Title: 50–60 ký tự\n"
+                             "- Meta description: 120–160 ký tự\n- 1 thẻ h1 mỗi trang\n\n## Nguồn\n"
+                             "- https://developers.google.com/search/docs/fundamentals/seo-starter-guide"},
+        {"slug": "json-ld-local-business", "title": "Mẫu JSON-LD LocalBusiness",
+         "content_markdown": "# Mẫu JSON-LD LocalBusiness\n\n```html\n<script type=\"application/ld+json\">\n"
+                             "{\"@context\": \"https://schema.org\", \"@type\": \"Bakery\", \"name\": \"Tiệm bánh\", "
+                             "\"telephone\": \"+84…\", \"openingHours\": \"Mo-Su 06:00-21:00\"}\n</script>\n```\n\n"
+                             "## Nguồn\n- https://schema.org/LocalBusiness"},
+    ],
+    "skill": {"name": "seo-content-workflow", "description": "Quy trình viết nội dung chuẩn SEO cho một trang web: "
+                                                             "chọn từ khoá, dàn ý, viết, tự kiểm.",
+              "content_markdown": "# Quy trình viết nội dung chuẩn SEO\n\n1. Đọc SPEC, chọn 1 từ khoá chính + 2–3 "
+                                  "từ khoá phụ cho trang.\n2. Lập dàn ý: h1 → các h2 theo ý định tìm kiếm.\n"
+                                  "3. Viết title, meta description theo ngưỡng trong knowledge seo-on-page.\n"
+                                  "4. Viết nội dung, chèn vào view Blade.\n5. Tự kiểm theo checklist rồi nộp.\n"},
+    "existing_skills": [],
+    "skill_downloads": [],
+}
+
+
 class DemoAgent:
     def __init__(self, role, ctx, hooks, state):
         self.role, self.ctx, self.hooks, self.state = role, ctx, hooks, state
@@ -106,6 +174,16 @@ class DemoAgent:
                 "## Kết quả\n- Trang `/home` đã dựng xong.\n- QA phát hiện 1 lỗi, đã sửa.\n- Kiểm duyệt: đạt 8/10.\n\n"
                 "_Đây là chế độ demo, agent là giả lập._",
                 "how_to_check": ["Bấm Xem trước, mở /home"], "known_issues": [], "next_steps": ["Thêm API key để chạy thật"]}
+
+    def submit_hiring(self, _):
+        self._say("Đọc yêu cầu tuyển dụng của {@owner}. Mình tìm tài liệu chuẩn nghề trước rồi mới soạn hồ sơ.")
+        self._tool("read_reference", "marketing/marketing-seo-specialist.md")
+        self._tool("read_reference", "marketing/marketing-content-creator.md")
+        self._tool("web_search", "Google title link meta description guidelines 2026")
+        self._tool("web_fetch", "https://developers.google.com/search/docs/appearance/title-link")
+        self._say("Đã đọc 3 nguồn chính thức, đang chắt lọc thành rules, checklist và tài liệu cho người mới.")
+        return {"summary": "Đề xuất tuyển 1 người viết nội dung chuẩn SEO cho các website (demo, dữ liệu mẫu).",
+                "candidates": [DEMO_SEO_CANDIDATE]}
 
     def submit_lessons(self, _):
         return {"lessons": [{"role": "frontend", "text": "Kiểm tiêu đề dài ở màn 375px trước khi nộp, tránh tràn chữ."}]}

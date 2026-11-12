@@ -58,6 +58,19 @@ CREATE TABLE IF NOT EXISTS reports (
     feedback TEXT,
     created_at REAL NOT NULL
 );
+CREATE TABLE IF NOT EXISTS hiring (
+    id TEXT PRIMARY KEY,
+    request TEXT NOT NULL,
+    source_project TEXT,
+    status TEXT NOT NULL,
+    proposal TEXT,
+    feedback TEXT,
+    error TEXT,
+    hired TEXT,
+    cost_usd REAL NOT NULL DEFAULT 0,
+    created_at REAL NOT NULL,
+    updated_at REAL NOT NULL
+);
 """
 
 
@@ -236,3 +249,40 @@ class DB:
     def update_report(self, rid: str, **fields: Any) -> None:
         cols = ", ".join(f"{k}=?" for k in fields)
         self._exec(f"UPDATE reports SET {cols} WHERE id=?", (*fields.values(), rid))
+
+    # ---------- tuyển dụng ----------
+    _HIRING_JSON = ("proposal", "hired")
+
+    def _hiring_row(self, r: dict | None) -> dict | None:
+        if r:
+            for k in self._HIRING_JSON:
+                r[k] = json.loads(r[k]) if r[k] else None
+        return r
+
+    def create_hiring(self, request: str, source_project: str | None = None) -> dict:
+        hid = uuid.uuid4().hex[:10]
+        now = time.time()
+        self._exec("INSERT INTO hiring (id, request, source_project, status, created_at, updated_at) "
+                   "VALUES (?,?,?,?,?,?)", (hid, request, source_project, "drafting", now, now))
+        return self.get_hiring(hid)  # type: ignore[return-value]
+
+    def get_hiring(self, hid: str) -> dict | None:
+        return self._hiring_row(self._one("SELECT * FROM hiring WHERE id=?", (hid,)))
+
+    def list_hiring(self) -> list[dict]:
+        return [self._hiring_row(r) for r in self._all("SELECT * FROM hiring ORDER BY created_at DESC")]  # type: ignore[misc]
+
+    def update_hiring(self, hid: str, **fields: Any) -> None:
+        for k in self._HIRING_JSON:
+            if k in fields and fields[k] is not None:
+                fields[k] = json.dumps(fields[k], ensure_ascii=False)
+        fields["updated_at"] = time.time()
+        cols = ", ".join(f"{k}=?" for k in fields)
+        self._exec(f"UPDATE hiring SET {cols} WHERE id=?", (*fields.values(), hid))
+
+    def add_hiring_cost(self, hid: str, cost: float) -> None:
+        self._exec("UPDATE hiring SET cost_usd=cost_usd+? WHERE id=?", (cost, hid))
+
+    def mark_hiring_interrupted(self) -> None:
+        self._exec("UPDATE hiring SET status='failed', error='Server khởi động lại khi đang soạn đề xuất.' "
+                   "WHERE status='drafting'")

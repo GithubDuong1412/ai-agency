@@ -37,30 +37,43 @@ const GLASS = '#bfe3f2'        // kính cửa sổ, vách kính
 const LOBBY_FLOOR = '#c9a57a'  // sàn gỗ sảnh
 const ACCENT = '#2dd4bf'       // viền teal
 
-type Seat = { role: Role; x: number; z: number }
-/** lead = phòng riêng Trưởng dự án (giữa hàng sau); left/right = cột phòng ban hai bên sảnh */
+/** face: góc xoay bàn quanh trục Y (0 = màn hình hướng −Z, π/2 = hướng −X, quay vào tường trái) */
+type Seat = { role: Role; x: number; z: number; face?: number }
+/** lead = phòng riêng Trưởng dự án (giữa hàng sau); dept = phòng có người (Phòng IT, phòng ban khác); empty = phòng trống chờ tuyển */
 type Room = {
-  name: string; color: string; x: number; z: number; w: number; d: number; seats: Seat[]
-  kind: 'lead' | 'dept'; side: 'back' | 'left' | 'right'
+  id: string; name: string; color: string; x: number; z: number; w: number; d: number; seats: Seat[]
+  kind: 'lead' | 'dept' | 'empty'; side: 'back' | 'left' | 'right'
 }
 type Rect = { x: number; z: number; w: number; d: number }
 
+/** Các phòng ban ngồi chung Phòng IT (cột trái, cao 2 ô). */
+const IT_DEPARTMENTS = ['UI/UX', 'Dev', 'QA', 'Kiểm duyệt']
+const IT_COLS = 2        // số bàn ở hàng sát vách sau của Phòng IT
+const WALL_STEP = 3.6   // khoảng cách giữa các bàn xếp dọc tường trái Phòng IT
+const WALL_Z0 = 4.8      // bàn đầu tiên dọc tường trái cách vách sau (chừa chỗ cho ghế hàng sau)
+const EMPTY_COLOR = '#94a3b8'
+
 /**
- * Bố cục: phòng Trưởng dự án (phòng ban có role `pm`) ở giữa hàng sau; các phòng ban còn lại chia xen kẽ
- * hai cột trái/phải (theo thứ tự trong config); sảnh là khoảng giữa hai cột, trước phòng Trưởng dự án.
+ * Bố cục: phòng Trưởng dự án (phòng ban có role `pm`) ở giữa hàng sau; cột trái là Phòng IT (gộp 2 ô) chứa mọi
+ * agent thuộc `IT_DEPARTMENTS`; cột phải gồm các ô phòng ban khác, ô chưa có ai là phòng trống (để tuyển thêm sau).
+ * Sảnh là khoảng giữa hai cột, trước phòng Trưởng dự án.
  */
 function layout(roles: Role[]): { rooms: Room[]; lobby: Rect; hall: Rect; extentX: number; extentZ: number } {
   const deps = [...new Set(roles.map(r => r.department))]
   const leadDep = roles.find(r => r.key === 'pm')?.department ?? deps[0]
-  const others = deps.filter(d => d !== leadDep)
+  const isIT = (d: string) => d !== leadDep && IT_DEPARTMENTS.includes(d)
+  const itRoles = roles.filter(r => isIT(r.department))
+  const others = deps.filter(d => d !== leadDep && !isIT(d))
   const members = (d: string) => roles.filter(m => m.department === d)
   const deptW = (d: string) => Math.max(2, members(d).length) * SEAT + ROOM_PAD
-  const left = others.filter((_, i) => i % 2 === 0), right = others.filter((_, i) => i % 2 === 1)
-  const colW = Math.max(SEAT * 2 + ROOM_PAD, ...others.map(deptW))
+  const colW = Math.max(SEAT * IT_COLS + ROOM_PAD, ...others.map(deptW))
   const leadW = Math.max(2, leadDep ? members(leadDep).length : 1) * SEAT + 5
-  const rows = Math.max(1, left.length, right.length)
+  const rows = Math.max(2, others.length)
+  const wallN = Math.max(0, itRoles.length - IT_COLS)
+  const itD = Math.max(2 * ROOM_D + GAP, WALL_Z0 + (wallN - 1) * WALL_STEP + 3.5)
+  const itSlots = Math.ceil((itD + GAP) / (ROOM_D + GAP))  // số ô hàng ở cột trái mà Phòng IT chiếm
   const totalW = colW * 2 + leadW + GAP * 2
-  const officeD = Math.max(rows * ROOM_D + (rows - 1) * GAP, ROOM_D + GAP + LOBBY_MIN_D)
+  const officeD = Math.max(rows * ROOM_D + (rows - 1) * GAP, itD, ROOM_D + GAP + LOBBY_MIN_D)
   const totalD = officeD + HALL_D  // + Sảnh giải trí phía trước, rộng hết bề ngang
   const top = -totalD / 2
 
@@ -68,13 +81,35 @@ function layout(roles: Role[]): { rooms: Room[]; lobby: Rect; hall: Rect; extent
     const ms = members(name)
     const span = (ms.length - 1) * SEAT
     const seats = ms.map((role, k) => ({ role, x: x - span / 2 + k * SEAT, z: z + 0.2 }))
-    return { name, color: ms[0]?.color || '#64748b', x, z, w, d: ROOM_D, seats, kind, side }
+    return { id: `${side}:${name}`, name, color: ms[0]?.color || '#64748b', x, z, w, d: ROOM_D, seats, kind, side }
   }
+  const empty = (side: 'left' | 'right', r: number, x: number, z: number): Room =>
+    ({ id: `${side}:empty${r}`, name: 'Phòng trống', color: EMPTY_COLOR, x, z, w: colW, d: ROOM_D, seats: [], kind: 'empty', side })
   const rooms: Room[] = []
-  if (leadDep) rooms.push(mk(leadDep, 0, top + ROOM_D / 2, leadW, 'lead', 'back'))
+  if (leadDep) {
+    // phòng Trưởng dự án: bàn dồn vào góc sau bên trái (giá sách nằm ở vách sau phía phải), xoay ngược:
+    // ngồi lưng dựa tường, mặt nhìn ra cửa, màn hình quay vào trong (riêng tư)
+    const lead = mk(leadDep, 0, top + ROOM_D / 2, leadW, 'lead', 'back')
+    lead.seats = lead.seats.map((s, k) => ({ ...s, x: -leadW / 2 + 2.0 + k * SEAT, z: top + 1.7, face: Math.PI }))
+    rooms.push(lead)
+  }
   const colX = (s: 'left' | 'right') => (s === 'left' ? -1 : 1) * (leadW / 2 + GAP + colW / 2)
-  for (const [list, s] of [[left, 'left'], [right, 'right']] as const) {
-    list.forEach((name, r) => rooms.push(mk(name, colX(s), top + r * (ROOM_D + GAP) + ROOM_D / 2, deptW(name), 'dept', s)))
+  const rowZ = (r: number) => top + r * (ROOM_D + GAP) + ROOM_D / 2
+  // Phòng IT: cột trái, mép sau trùng hàng 0. IT_COLS bàn đầu xếp sát vách sau (nhìn −Z);
+  // các bàn còn lại xếp dọc tường trái, màn hình quay vào tường (nhìn −X), giữa phòng để trống làm lối đi.
+  {
+    const x = colX('left'), z = top + itD / 2
+    const back = top
+    const wallX = x - colW / 2 + 1.15
+    const seats: Seat[] = itRoles.map((role, i) => i < IT_COLS
+      ? { role, x: x + (i - (IT_COLS - 1) / 2) * SEAT, z: back + 1.9 }
+      : { role, x: wallX, z: back + WALL_Z0 + (i - IT_COLS) * WALL_STEP, face: Math.PI / 2 })
+    rooms.push({ id: 'left:it', name: 'Phòng IT', color: ACCENT, x, z, w: colW, d: itD, seats, kind: 'dept', side: 'left' })
+  }
+  for (let r = itSlots; r < rows; r++) rooms.push(empty('left', r, colX('left'), rowZ(r)))
+  for (let r = 0; r < rows; r++) {
+    const name = others[r]
+    rooms.push(name ? mk(name, colX('right'), rowZ(r), deptW(name), 'dept', 'right') : empty('right', r, colX('right'), rowZ(r)))
   }
   const lobbyZ0 = top + ROOM_D + GAP, lobbyZ1 = top + officeD
   const lobby = { x: 0, z: (lobbyZ0 + lobbyZ1) / 2, w: leadW + GAP, d: lobbyZ1 - lobbyZ0 }
@@ -129,7 +164,7 @@ function RoomBlock({ room }: { room: Room }) {
   const { x, z, w, d, color, name, kind, side } = room
   const back = tint(color)
   const zB = z - d / 2 + 0.08, xL = x - w / 2 + 0.08, xR = x + w / 2 - 0.08, zF = z + d / 2 - 0.08
-  const lead = kind === 'lead'
+  const lead = kind === 'lead', vacant = kind === 'empty'
   return (
     <group>
       {/* sàn phòng + sọc màu phòng ở mép trước */}
@@ -156,20 +191,56 @@ function RoomBlock({ room }: { room: Room }) {
       ))}
       {lead && <>
         <Sofa position={[x + w / 2 - 1.5, 0.2, z + d / 2 - 1.3]} rotation={Math.PI} color="#8b5e3c" />
-        {/* kệ sách gỗ sát vách sau */}
-        <mesh castShadow position={[x - w / 2 + 1.2, 0.95, zB + 0.35]}><boxGeometry args={[1.6, 1.5, 0.45]} /><meshStandardMaterial color={WOOD} /></mesh>
-        {[0.55, 1.0, 1.45].map(y => <mesh key={y} position={[x - w / 2 + 1.2, y, zB + 0.58]}><boxGeometry args={[1.4, 0.04, 0.02]} /><meshStandardMaterial color="#f2e6d0" /></mesh>)}
+        {/* kệ sách gỗ sát vách sau, phía phải (góc trái dành cho bàn làm việc) */}
+        <mesh castShadow position={[x + w / 2 - 2.6, 0.95, zB + 0.35]}><boxGeometry args={[1.6, 1.5, 0.45]} /><meshStandardMaterial color={WOOD} /></mesh>
+        {[0.55, 1.0, 1.45].map(y => <mesh key={y} position={[x + w / 2 - 2.6, y, zB + 0.58]}><boxGeometry args={[1.4, 0.04, 0.02]} /><meshStandardMaterial color="#f2e6d0" /></mesh>)}
       </>}
       <Plant position={[x + w / 2 - 0.6, 0.2, z - d / 2 + 0.6]} />
-      {/* phòng Trưởng dự án: biển tên giữa đỉnh vách sau; phòng ban: nhãn trên đỉnh vách trái */}
-      <Html position={lead ? [x, 2.0, zB] : [x - w / 2 + 0.08, 1.75, z]} center zIndexRange={[5, 0]} style={{ pointerEvents: 'none' }}>
-        <div className={`flex items-center max-sm:hidden gap-1.5 whitespace-nowrap rounded-lg px-2.5 py-1 text-[11px] font-medium shadow-lg ${lead ? 'bg-amber-300 text-ink-950' : 'bg-ink-900/95 text-slate-100'}`}>
-          <span className="inline-block h-2 w-2 shrink-0 rounded-full" style={{ background: lead ? '#0b1220' : color }} aria-hidden="true" />
-          {lead ? 'Phòng Trưởng dự án' : name}
-          <span className={lead ? 'text-ink-800' : 'text-slate-400'}>{lead ? name : room.seats.length}</span>
-        </div>
-      </Html>
+      {/* tên phòng in trên sàn, đặt ở khoảng trống (né bàn, sofa) */}
+      <FloorLabel text={lead ? 'Phòng Trưởng dự án' : name} color={lead ? '#b45309' : color}
+        {...(lead ? { at: [x - 1, z + d / 2 - 1.0], size: 0.7, maxW: 6 }
+          : vacant ? { at: [x, z], size: 1.0, maxW: w - 2 }
+          : room.seats.some(s => s.face) ? { at: [x + 1.2, z + 1], size: 1.1, maxW: 6.5 }
+          : { at: [x, z + d / 2 - 1.0], size: 0.7, maxW: w - 2 })} />
     </group>
+  )
+}
+
+/**
+ * Chữ in nằm trên sàn (vẽ bằng canvas để dùng font của trang, đủ dấu tiếng Việt). Chữ chạy theo trục X,
+ * đầu chữ hướng −Z, nên đọc được từ góc camera. `size` = chiều cao dòng chữ, `maxW` = bề ngang tối đa.
+ */
+function FloorLabel({ text, color, at, size, maxW }: { text: string; color: string; at: [number, number]; size: number; maxW: number }) {
+  const [tex, setTex] = useState<{ map: THREE.CanvasTexture; aspect: number } | null>(null)
+  useEffect(() => {
+    let alive = true, made: THREE.CanvasTexture | null = null
+    const draw = () => {
+      if (!alive) return
+      const font = `700 120px ${getComputedStyle(document.body).fontFamily || 'sans-serif'}`
+      const c = document.createElement('canvas'), g = c.getContext('2d')!
+      g.font = font
+      const tw = Math.ceil(g.measureText(text).width)
+      c.width = tw + 48; c.height = 168
+      g.font = font; g.textAlign = 'center'; g.textBaseline = 'middle'
+      g.fillStyle = '#' + new THREE.Color(color).lerp(new THREE.Color('#0b1220'), 0.15).getHexString()
+      g.fillText(text, c.width / 2, c.height / 2 + 6)
+      made = new THREE.CanvasTexture(c)
+      made.colorSpace = THREE.SRGBColorSpace
+      made.anisotropy = 8
+      setTex({ map: made, aspect: c.width / c.height })
+    }
+    // chờ font của trang tải xong rồi mới vẽ (không thì canvas rơi về font mặc định)
+    if (document.fonts?.ready) document.fonts.ready.then(draw)
+    else draw()
+    return () => { alive = false; made?.dispose() }
+  }, [text, color])
+  if (!tex) return null
+  const h = Math.min(size * 1.4, maxW / tex.aspect)  // canvas có lề trên/dưới: 1.4 × chiều cao chữ
+  return (
+    <mesh rotation={[-Math.PI / 2, 0, 0]} position={[at[0], 0.212, at[1]]}>
+      <planeGeometry args={[h * tex.aspect, h]} />
+      <meshBasicMaterial map={tex.map} transparent opacity={0.8} depthWrite={false} toneMapped={false} />
+    </mesh>
   )
 }
 
@@ -509,7 +580,7 @@ function Desk({ seat, screenOn, still, task, onPick }: {
     if (screen.current) screen.current.emissiveIntensity = screenOn ? 0.55 + (still ? 0 : Math.sin(clock.getElapsedTime() * 3 + x) * 0.08) : 0.04
   })
   return (
-    <group position={[x, 0.2, z]} onClick={e => { e.stopPropagation(); onPick() }}>
+    <group position={[x, 0.2, z]} rotation={[0, seat.face ?? 0, 0]} onClick={e => { e.stopPropagation(); onPick() }}>
       {/* bàn */}
       <mesh castShadow receiveShadow position={[0, 0.75, -0.3]}><boxGeometry args={[2.2, 0.12, 1.1]} /><meshStandardMaterial color="#ffffff" /></mesh>
       {[-0.95, 0.95].map(dx => (
@@ -543,18 +614,30 @@ function Desk({ seat, screenOn, still, task, onPick }: {
 /** Lối đi từ ghế ở sảnh tới ghế ở bàn: ra khỏi phòng qua mặt trước (phòng TDA qua cửa giữa),
  *  đi dọc hành lang tới mép sảnh, vòng qua phía trước quầy lễ tân rồi tới ghế đôn. Trả về thứ tự sảnh → bàn. */
 function routeOf(seat: Seat, room: Room, lobby: Rect, spot: Spot): P3[] {
-  const chair: P3 = [seat.x, ROOM_FLOOR, seat.z + 0.65]
+  const f = seat.face ?? 0
+  const chair: P3 = [seat.x + Math.sin(f) * 0.65, ROOM_FLOOR, seat.z + Math.cos(f) * 0.65]
   const front = room.z + room.d / 2
   const below = counterZ(lobby) + 1.0
   const pts: P3[] = [chair]
   if (room.kind === 'lead') {
     const side = spot.x >= room.x ? 1 : -1
-    pts.push([seat.x, ROOM_FLOOR, front - 0.6], [room.x, ROOM_FLOOR, front - 0.6], [room.x, GROUND, front + 0.9],
+    // bàn xoay ngược (ghế sát tường): ra khỏi ghế thì đi vòng qua cạnh phải của bàn
+    const exitX = f ? seat.x + 1.6 : seat.x
+    if (f) pts.push([exitX, ROOM_FLOOR, chair[2]])
+    pts.push([exitX, ROOM_FLOOR, front - 0.6], [room.x, ROOM_FLOOR, front - 0.6], [room.x, GROUND, front + 0.9],
       [room.x + side * 2.6, GROUND, front + 0.9], [room.x + side * 2.6, GROUND, below])
   } else {
     const sx = (room.side === 'left' ? -1 : 1) * (lobby.w / 2 - 0.6)
     const zc = front + 0.7
-    pts.push([seat.x, ROOM_FLOOR, front - 0.4], [seat.x, GROUND, zc], [sx, GROUND, zc], [sx, GROUND, Math.max(zc, below)])
+    // ra sau ghế (lối giữa hai hàng bàn) → lối đi giữa phòng → cửa trước, không đi xuyên bàn hàng trước
+    // bàn quay vào tường trái: lùi ra giữa phòng theo hướng ghế rồi đi thẳng ra cửa
+    if (f) pts.push([room.x, ROOM_FLOOR, chair[2]])
+    else {
+      const aisleZ = seat.z + 1.6
+      pts.push([seat.x, ROOM_FLOOR, aisleZ], [room.x, ROOM_FLOOR, aisleZ])
+    }
+    pts.push([room.x, ROOM_FLOOR, front - 0.4],
+      [room.x, GROUND, zc], [sx, GROUND, zc], [sx, GROUND, Math.max(zc, below)])
   }
   pts.push([spot.x, LOBBY_Y, spot.z])
   return pts.reverse()
@@ -653,8 +736,10 @@ const CHAT_ICON_KEYS = Object.keys(CHAT_ICONS) as ChatIcon[]
  * Ở bàn: đang thao tác thì gõ phím (2 tay), đang suy nghĩ thì đám mây "…" trên đầu.
  * Lúc rảnh có thể đi dạo / chơi bi-a (theo `idle`) hoặc ngồi tám chuyện (bong bóng icon `chatIcon`).
  */
-function Character({ role, path, onDuty, typing, thinking, bubble, bubbleAt, highlight, selected, still, onPick, onPlace, posStore, idle, chatIcon }: {
-  role: Role; path: Path; onDuty: boolean; typing: boolean; thinking: boolean; bubble: string | null; bubbleAt?: number
+function Character({ role, path, deskYaw = 0, onDuty, typing, thinking, bubble, bubbleAt, highlight, selected, still, onPick, onPlace, posStore, idle, chatIcon }: {
+  role: Role; path: Path
+  /** hướng mặt khi ngồi bàn = góc xoay của bàn (seat.face) */
+  deskYaw?: number; onDuty: boolean; typing: boolean; thinking: boolean; bubble: string | null; bubbleAt?: number
   highlight: boolean; selected: boolean; still: boolean; onPick: () => void
   onPlace: (place: Place) => void
   posStore: Map<string, THREE.Vector3>
@@ -693,6 +778,7 @@ function Character({ role, path, onDuty, typing, thinking, bubble, bubbleAt, hig
     const s = path.pts[0], next = path.pts[1]
     return yawOf(s.x - next.x, s.z - next.z)  // quay lưng về lối đi = mặt hướng vào giữa thảm
   }, [path])
+  // ngồi bàn: mặt nhìn theo hướng bước cuối cùng vào ghế (bàn thường nhìn −Z, bàn sát tường trái nhìn −X)
 
   useFrame(({ clock }, delta) => {
     const t = clock.getElapsedTime()
@@ -731,7 +817,7 @@ function Character({ role, path, onDuty, typing, thinking, bubble, bubbleAt, hig
     const nowPlace: Place = needMove ? 'walk' : atDesk ? 'desk' : atLobby ? 'lobby' : 'away'
     if (nowPlace !== place) setPlace(nowPlace)
     // hướng mặt: đi thì theo hướng đi; ngồi bàn nhìn màn hình; ngồi sảnh nhìn vào bàn tròn; đi chơi thì theo hoạt động
-    const wantYaw = atDesk ? 0 : atLobby ? lobbyFacing : away && act ? act.face : (forward ? yawOf(dx, dz) : yawOf(-dx, -dz))
+    const wantYaw = atDesk ? deskYaw : atLobby ? lobbyFacing : away && act ? act.face : (forward ? yawOf(dx, dz) : yawOf(-dx, -dz))
     if (turn.current) turn.current.rotation.y = still ? wantYaw : lerpAngle(turn.current.rotation.y, wantYaw, Math.min(1, dt * 10))
 
     // bi-a: tới lượt thì cúi người, 2 tay đưa ra trước, gậy thụt; không tới lượt thì cầm gậy dựng đứng
@@ -1253,7 +1339,7 @@ export default function Office3D({ config, overview, live, events, picked, onPic
 
         {rooms.length > 0 && <Lobby rect={lobby} spots={spots} still={still} />}
         {rooms.length > 0 && <GameHall rect={hall} playing={poolPlaying} still={still} />}
-        {rooms.map(room => <RoomBlock key={room.name} room={room} />)}
+        {rooms.map(room => <RoomBlock key={room.id} room={room} />)}
         {seats.map(seat => {
           const key = seat.role.key
           const a = live[key]
@@ -1266,7 +1352,7 @@ export default function Office3D({ config, overview, live, events, picked, onPic
               <Desk seat={seat} screenOn={duty && working && places[key] === 'desk'} still={still}
                 task={working && places[key] === 'desk' ? currentTask(key) : undefined} onPick={() => onPickAgent(seat.role)} />
               {path && (
-                <Character role={seat.role} path={path} onDuty={duty} typing={working && !a?.thinking}
+                <Character role={seat.role} path={path} deskYaw={seat.face ?? 0} onDuty={duty} typing={working && !a?.thinking}
                   thinking={working && !!a?.thinking} bubble={bubble} bubbleAt={a?.lastAt} still={still} posStore={posStore}
                   onPlace={pl => setPlaces(prev => (prev[key] === pl ? prev : { ...prev, [key]: pl }))}
                   idle={idle[key] ?? null} chatIcon={chat[key]?.icon ?? null}

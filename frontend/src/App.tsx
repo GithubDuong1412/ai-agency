@@ -6,6 +6,7 @@ import { Avatar, Empty, StatusPill } from './components/common'
 import { Office, OfficeFloor } from './components/Office'
 import type { SafeArea } from './components/Office3D'
 import { ApprovalPanel, CommandBar, HandoffTicker, PendingCard, ProjectCommandBar } from './components/Panels'
+import { Hiring } from './components/Hiring'
 import { Profiles } from './components/Profiles'
 import { ProjectDetail } from './components/ProjectDetail'
 import { Header, MobileNav, Sidebar, type View } from './components/Shell'
@@ -166,7 +167,10 @@ export default function App() {
   )
 
   let main
-  if (view.kind === 'profiles') {
+  if (view.kind === 'hiring') {
+    main = <Hiring config={config} events={events} projectTitle={projectTitle} onOpenProject={openProject}
+      onOpenProfile={scope => setView({ kind: 'profiles', scope })} />
+  } else if (view.kind === 'profiles') {
     main = <Profiles initialScope={view.scope} onScopeChange={scope => setView({ kind: 'profiles', scope })} />
   } else if (view.kind === 'project') {
     main = <ProjectDetail id={view.id} data={projectData} reload={reloadProject} roles={roles} events={events} live={live}

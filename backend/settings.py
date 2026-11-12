@@ -29,9 +29,25 @@ def get_config() -> dict:
     return cfg
 
 
+def allowed_models() -> list[str]:
+    """Model được chọn cho nhân sự tuyển thêm: model mặc định + các model đang dùng trong config.yaml."""
+    cfg = get_config()
+    out = [cfg.get("default_model", "claude-opus-5-5")]
+    for r in cfg["roles"].values():
+        m = (r or {}).get("model")
+        if m and m not in out:
+            out.append(m)
+    return out
+
+
 def role_config(role: str) -> dict:
     cfg = get_config()
-    r = dict(cfg["roles"].get(role, {}))
+    r = dict(cfg["roles"].get(role) or {})
+    if not r:  # nhân sự tuyển thêm: thông tin nằm ở agents/hired.yaml
+        from .agents import hired
+        h = hired.get(role)
+        if h:
+            r = {k: h[k] for k in hired.DISPLAY_FIELDS if h.get(k)}
     r.setdefault("model", cfg.get("default_model", "claude-opus-5-5"))
     r.setdefault("effort", cfg.get("default_effort", "medium"))
     r.setdefault("name", role)

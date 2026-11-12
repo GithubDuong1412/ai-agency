@@ -4,6 +4,7 @@ from __future__ import annotations
 import asyncio
 import json
 import os
+import shutil
 from contextlib import asynccontextmanager
 from pathlib import Path
 
@@ -12,13 +13,14 @@ from fastapi.responses import FileResponse, StreamingResponse
 from fastapi.staticfiles import StaticFiles
 from pydantic import BaseModel
 
-from . import attachments, versions
+from . import attachments, hiring, versions
+from .agents import hired as hired_mod
 from .agents import profiles
 from .agents import skills as skills_mod
 from .db import DB
 from .events import EventBus
 from .orchestrator import Agency, roster
-from .settings import DATA_DIR, FRONTEND_DIST, get_config, has_api_key
+from .settings import AGENTS_DIR, DATA_DIR, FRONTEND_DIST, allowed_models, get_config, has_api_key
 from .tools.fs_tools import Sandbox, SandboxError
 
 DEMO = os.environ.get("AGENCY_DEMO") == "1"
@@ -35,11 +37,25 @@ if DEMO:
     agency.agents_dir = DATA_DIR / "demo-agents"
     for _scope in ("_team", "pm", "designer", "frontend", "backend", "qa", "reviewer"):
         (agency.agents_dir / _scope).mkdir(parents=True, exist_ok=True)
+    # nhân sự tuyển thử trong demo cũng ghi riêng
+    hired_mod.HIRED_FILE = agency.agents_dir / "hired.yaml"
+    hired_mod.BASE_DIR = agency.agents_dir
+    hired_mod.SKILLS_FILE = agency.agents_dir / "skills.yaml"
+    # hồ sơ + skill của demo cũng tách riêng: chép hồ sơ thật sang lần đầu, skill demo cài vào thư mục riêng
+    for _src in AGENTS_DIR.glob("*/*.md"):
+        _dst = agency.agents_dir / _src.parent.name / _src.name
+        if _src.parent.name != "_archive" and not _dst.exists() and _src.name != "lessons.md":
+            _dst.parent.mkdir(parents=True, exist_ok=True)
+            shutil.copy2(_src, _dst)
+    profiles.AGENTS_DIR = agency.agents_dir
+    skills_mod.ASSIGN_FILE = agency.agents_dir / "skills.yaml"
+    skills_mod.AGENCY_SKILLS_DIR = agency.agents_dir / "_skills"
 
 
 @asynccontextmanager
 async def lifespan(app: FastAPI):
     db.mark_interrupted()
+    db.mark_hiring_interrupted()
     db.migrate_name_tokens()
     yield
     agency.preview.stop_all()
@@ -85,7 +101,9 @@ def api_config():
     cfg = get_config()
     return {"agency_name": cfg.get("agency_name"), "owner_name": cfg.get("owner_name"),
             "agency_tagline": cfg.get("agency_tagline"), "owner_display": cfg.get("owner_display"),
-            "roles": roster(), "has_api_key": has_api_key() or DEMO, "demo": DEMO, "limits": cfg["limits"]}
+            "roles": roster(), "has_api_key": has_api_key() or DEMO, "demo": DEMO, "limits": cfg["limits"],
+            "permission_groups": [{"key": k, "label": v} for k, v in hired_mod.PERMISSION_LABELS.items()],
+            "models": allowed_models(), "efforts": list(hired_mod.EFFORTS)}
 
 
 @app.get("/api/overview")
@@ -103,6 +121,7 @@ def api_overview():
             "running_projects": sum(1 for p in projects if p["running"]),
             "open_tasks": sum(1 for t in tasks if t["status"] not in ("done",)),
             "pending_reviews": len(pending),
+            "pending_hiring": sum(1 for h in db.list_hiring() if h["status"] == "pending"),
             "cost_usd": round(sum(p["cost_usd"] for p in projects), 4),
         },
         "projects": projects,
@@ -280,10 +299,87 @@ def version_restore(pid: str, sha: str):
     return {"ok": True, "sha": new}
 
 
+# ---------- tuyển dụng / nhân sự tuyển thêm ----------
+class HiringIn(BaseModel):
+    request: str
+
+
+class HiringApproveIn(BaseModel):
+    candidates: list[dict]
+
+
+class HiringReviseIn(BaseModel):
+    feedback: str
+
+
+class RoleUpdateIn(BaseModel):
+    name: str | None = None
+    title: str | None = None
+    department: str | None = None
+    color: str | None = None
+    model: str | None = None
+    effort: str | None = None
+    permissions: list[str] | None = None
+    working_style: str | None = None
+
+
+def _hiring_call(fn, *args):
+    try:
+        return fn(*args)
+    except (hiring.HiringError, hired_mod.HiredError) as e:
+        raise HTTPException(400, str(e))
+    except RuntimeError as e:
+        raise HTTPException(409, str(e))
+
+
+@app.get("/api/hiring")
+def list_hiring():
+    return {"requests": agency.hiring.list()}
+
+
+@app.post("/api/hiring")
+def request_hiring(body: HiringIn):
+    return _hiring_call(agency.hiring.request, body.request)
+
+
+@app.post("/api/hiring/{hid}/approve")
+def approve_hiring(hid: str, body: HiringApproveIn):
+    return {"hired": _hiring_call(agency.hiring.approve, hid, body.candidates)}
+
+
+@app.get("/api/hiring/{hid}/skills/{name}/file")
+def staged_skill_file(hid: str, name: str, path: str = "SKILL.md"):
+    return {"content": _hiring_call(agency.hiring.staged_file, hid, name, path)}
+
+
+@app.post("/api/hiring/{hid}/reject")
+def reject_hiring(hid: str):
+    return _hiring_call(agency.hiring.reject, hid)
+
+
+@app.post("/api/hiring/{hid}/revise")
+def revise_hiring(hid: str, body: HiringReviseIn):
+    if not body.feedback.strip():
+        raise HTTPException(400, "Hãy ghi góp ý để Trưởng dự án soạn lại.")
+    return _hiring_call(agency.hiring.revise, hid, body.feedback)
+
+
+@app.put("/api/roles/{key}")
+def update_role(key: str, body: RoleUpdateIn):
+    fields = {k: v for k, v in body.model_dump().items() if v is not None}
+    return _hiring_call(hiring.update_role, agency, key, fields)
+
+
+@app.delete("/api/roles/{key}")
+def remove_role(key: str):
+    _hiring_call(hiring.remove_role, agency, key)
+    return {"ok": True}
+
+
 # ---------- hồ sơ chuyên môn của agent ----------
 def _profile_scopes() -> list[str]:
-    from .agents.roles import ROLES
-    return list(ROLES)
+    from .agents.roles import all_roles
+    return list(all_roles())
 
 
 def _profile_call(fn, *args):

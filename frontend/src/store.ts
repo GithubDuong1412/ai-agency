@@ -11,7 +11,10 @@ export type AgentLive = {
   lastTool?: string
 }
 
-const REFRESH_TYPES = new Set(['task_update', 'project_status', 'report', 'plan', 'project_created', 'usage', 'review'])
+const REFRESH_TYPES = new Set(['task_update', 'project_status', 'report', 'plan', 'project_created', 'usage', 'review',
+  'hiring_update', 'roster_changed'])
+/** project_id của sự kiện chung (tuyển dụng, đổi nhân sự), không thuộc dự án nào */
+export const AGENCY_PID = '_agency'
 
 /** Tải config + overview, nghe SSE và suy ra trạng thái từng agent. */
 export function useAgency() {
@@ -55,6 +58,8 @@ export function useAgency() {
         lastId.current = ev.id
         setEvents(prev => (prev.length > 1500 ? [...prev.slice(-1000), ev] : [...prev, ev]))
         if (REFRESH_TYPES.has(ev.type)) scheduleRefresh()
+        // tuyển / sửa / cho nghỉ nhân sự: tải lại danh sách đội (văn phòng, thanh bên, hồ sơ)
+        if (ev.type === 'roster_changed') api.config().then(setConfig).catch(() => {})
       }
     }).catch(() => setConnected(false))
     return () => { cancelled = true; es?.close() }
@@ -80,9 +85,11 @@ export function useAgency() {
     }
     // dự án bị dừng / lỗi → mọi người về trạng thái rảnh
     const running = new Set(overview?.projects.filter(p => p.running).map(p => p.id))
-    for (const a of Object.values(m)) if (a.projectId && !running.has(a.projectId)) { a.status = 'idle'; a.thinking = false }
+    // (việc chung như soạn đề xuất tuyển dụng không thuộc dự án: giữ theo agent_status)
+    for (const a of Object.values(m)) if (a.projectId && a.projectId !== AGENCY_PID && !running.has(a.projectId)) { a.status = 'idle'; a.thinking = false }
     return m
   }, [events, overview])
 
-  return { config, overview, events, live, connected, error, refresh }
+  const reloadConfig = useCallback(() => api.config().then(setConfig).catch(() => {}), [])
+  return { config, overview, events, live, connected, error, refresh, reloadConfig }
 }

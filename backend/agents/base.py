@@ -14,8 +14,8 @@ from ..settings import get_config, role_config
 from ..tools.registry import TOOL_SCHEMAS, ToolContext, execute_tool
 from . import skills as skills_mod
 from .profiles import load_profile
-from .roles import COMMON, FALLBACK_CONVENTIONS, ROLES
-from .schemas import SUBMIT_TOOLS, submit_tool_def
+from .roles import FALLBACK_CONVENTIONS, all_roles, common_prompt
+from .schemas import SUBMIT_NAMES, submit_tool_def, submit_tools
 
 
 def first_content(instruction: str, images: list[Path] | None = None) -> str | list[dict]:
@@ -49,7 +49,7 @@ def build_system(role: str) -> str:
     if not prof.team_rules:
         rules = f"{FALLBACK_CONVENTIONS}\n\n{rules}".strip()
     # Hồ sơ đặt sau phần cố định; nội dung ổn định trong một lần chạy nên vẫn được prompt cache.
-    return f"{COMMON}\n\n{me}\n{ROLES[role].prompt}\n\n=== LUẬT VÀ KIẾN THỨC CỦA BẠN ===\n\n{rules}"
+    return f"{common_prompt()}\n\n{me}\n{all_roles()[role].prompt}\n\n=== LUẬT VÀ KIẾN THỨC CỦA BẠN ===\n\n{rules}"
 
 
 class AgentCancelled(Exception):
@@ -101,10 +101,11 @@ def _check_required(schema: dict, value: Any, path: str = "") -> str | None:
 
 class Agent:
     def __init__(self, role: str, client: Any, ctx: ToolContext, hooks: Hooks):
-        if role not in ROLES:
+        roles = all_roles()
+        if role not in roles:
             raise ValueError(f"Vai trò không hợp lệ: {role}")
         self.role = role
-        self.defn = ROLES[role]
+        self.defn = roles[role]
         self.rcfg = role_config(role)
         self.client = client
         self.ctx = ctx
@@ -112,18 +113,21 @@ class Agent:
         self.cfg = get_config()
 
     # ---------- request ----------
-    def _tools(self, submit: str) -> list[dict]:
+    def _tools(self, submit: str, defs: dict[str, dict] | None = None,
+               server_tools: list[dict] | None = None, extra_tools: list[str] | None = None) -> list[dict]:
         tools = []
-        names = list(self.defn.tools)
+        names = list(self.defn.tools) + [t for t in extra_tools or [] if t not in self.defn.tools]
         if skills_mod.skills_for(self.role):   # chỉ thêm tool skill khi có skill được giao
             names += ["use_skill", "run_skill_script"]
         for name in names:
             s = TOOL_SCHEMAS[name]
             tools.append({"name": name, "description": s["description"], "input_schema": s["input_schema"],
                           "eager_input_streaming": True})
-        sub = submit_tool_def(submit)
+        sub = submit_tool_def(submit, defs)
         sub["eager_input_streaming"] = True
         tools.append(sub)
+        # server tool (web_search / web_fetch): API tự chạy; không thêm eager_input_streaming
+        tools += [dict(t) for t in server_tools or []]
         return tools
 
     def _system(self) -> str:
@@ -146,12 +150,14 @@ class Agent:
             return stream.get_final_message()
 
     # ---------- loop ----------
-    def run(self, instruction: str, submit: str, images: list[Path] | None = None) -> AgentResult:
-        if submit not in SUBMIT_TOOLS:
+    def run(self, instruction: str, submit: str, images: list[Path] | None = None,
+            server_tools: list[dict] | None = None, extra_tools: list[str] | None = None) -> AgentResult:
+        if submit not in SUBMIT_NAMES:
             raise ValueError(submit)
-        submit_schema = SUBMIT_TOOLS[submit]["input_schema"]
+        defs = submit_tools()  # dựng một lần cho cả lượt chạy (giữ nguyên để prompt cache ổn định)
+        submit_schema = defs[submit]["input_schema"]
         system = self._system()
-        tools = self._tools(submit)
+        tools = self._tools(submit, defs, server_tools, extra_tools)
         # Lời nhắn chen ngang của Sếp: đọc hết khi bắt đầu, sau đó nhận thêm sau mỗi lượt gọi tool
         owner_notes = getattr(self.hooks, "owner_notes", None)
         seen = 0
@@ -188,6 +194,12 @@ class Agent:
                 text = "\n".join(b.text for b in resp.content if b.type == "text" and b.text.strip())
                 if text:
                     emit("message", text=text, to="all", kind="note")
+                # web_search / web_fetch do API tự chạy: chỉ báo tiến độ cho dashboard
+                for b in resp.content:
+                    if b.type == "server_tool_use":
+                        inp = getattr(b, "input", None) or {}
+                        what = inp.get("query") or inp.get("url") or ""
+                        emit("tool", tool=b.name, summary=str(what)[:300], is_error=False)
 
                 tool_uses = [b for b in resp.content if b.type == "tool_use"]
                 if not tool_uses:

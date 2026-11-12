@@ -1,10 +1,11 @@
-import { ArrowLeftRight, ClipboardCheck, FolderKanban, LayoutDashboard, ListTodo, UserCog, type LucideIcon } from 'lucide-react'
+import { ArrowLeftRight, ClipboardCheck, FolderKanban, LayoutDashboard, ListTodo, UserCog, UserPlus, type LucideIcon } from 'lucide-react'
 import type { Config, Overview } from '../api'
 import type { AgentLive } from '../store'
 
 export type View =
   | { kind: 'overview' } | { kind: 'tasks' } | { kind: 'reviews' } | { kind: 'handoffs' } | { kind: 'projects' }
   | { kind: 'department'; name: string } | { kind: 'project'; id: string } | { kind: 'profiles'; scope?: string }
+  | { kind: 'hiring' }
 
 const NAV: { kind: View['kind']; label: string; icon: LucideIcon }[] = [
   { kind: 'overview', label: 'Toàn cảnh', icon: LayoutDashboard },
@@ -13,6 +14,7 @@ const NAV: { kind: View['kind']; label: string; icon: LucideIcon }[] = [
   { kind: 'reviews', label: 'Review & duyệt', icon: ClipboardCheck },
   { kind: 'handoffs', label: 'Bàn giao', icon: ArrowLeftRight },
   { kind: 'profiles', label: 'Hồ sơ nhân sự', icon: UserCog },
+  { kind: 'hiring', label: 'Tuyển dụng', icon: UserPlus },
 ]
 
 export function Header({ config, connected, staff }: { config: Config | null; connected: boolean; staff: number }) {
@@ -61,6 +63,7 @@ export function Sidebar({ view, setView, config, overview, live }: {
   const counts: Record<string, number | undefined> = {
     reviews: overview?.stats.pending_reviews || undefined,
     projects: overview?.projects.length || undefined,
+    hiring: overview?.stats.pending_hiring || undefined,
   }
   return (
     <aside className="hidden w-60 shrink-0 flex-col gap-6 overflow-y-auto border-r border-white/5 bg-ink-900 p-4 scroll-thin lg:flex">
@@ -104,6 +107,7 @@ export function MobileNav({ view, setView, overview }: {
   const counts: Record<string, number | undefined> = {
     reviews: overview?.stats.pending_reviews || undefined,
     projects: overview?.projects.length || undefined,
+    hiring: overview?.stats.pending_hiring || undefined,
   }
   return (
     <nav aria-label="Điều hướng" className="flex shrink-0 gap-1 overflow-x-auto border-b border-white/5 bg-ink-900 px-4 py-2 [scrollbar-width:none] lg:hidden">
